@@ -7,8 +7,8 @@
  * Purpose:
  * - Clean up invalid transaction rows after Txn_ID backfill
  * - Enforce prerequisite completeness invariant
- * - Clear Txn_ID_Machine where prerequisites are partially missing
- * - Preserve raw user-entered data (non-destructive)
+ * - If transaction is partially filled → invalidate entire row
+ * - Log full row snapshot for admin audit
  *
  * Preconditions:
  * - Sheet must exist: Transaction_Raw
@@ -26,10 +26,10 @@
  * 2. Load Transaction_Raw into memory
  * 3. Resolve column indexes from header
  * 4. Iterate rows:
- *    a. Check prerequisite completeness
- *    b. If partially filled AND Txn_ID_Machine exists → clear it
- *    c. If fully empty → ignore
- *    d. If fully valid → keep untouched
+ *    a. If prerequisites partially filled → INVALID
+ *    b. Clear entire row (all columns)
+ *    c. Log full row snapshot
+ *    d. Fully empty or fully valid rows are untouched
  * 5. Write all mutations back in a single batch
  * 6. Emit execution summary
  *
@@ -84,21 +84,19 @@ function cleanupInvalidTransactions_TransactionRaw() {
 
   const IDX = {
     trxDate: col('Trx_Date_Entered'),
-    item: col('Item_Name_Entered'),
-    qtyVal: col('Qty_Value_Entered'),
+    item:    col('Item_Name_Entered'),
+    qtyVal:  col('Qty_Value_Entered'),
     qtyUnit: col('Qty_Unit_Entered'),
-    price: col('Price_Entered'),
-    txnId: col('Txn_ID_Machine')
+    price:   col('Price_Entered'),
+    txnId:   col('Txn_ID_Machine')
   };
 
   for (const [k, v] of Object.entries(IDX)) {
-    if (v === -1) {
-      throw new Error(`Transaction_Raw missing column: ${k}`);
-    }
+    if (v === -1) throw new Error(`Transaction_Raw missing column: ${k}`);
   }
 
   let scanned = 0;
-  let cleared = 0;
+  let deleted = 0;
 
   const output = data.map(r => r.slice());
 
@@ -115,19 +113,21 @@ function cleanupInvalidTransactions_TransactionRaw() {
       r[IDX.price]
     ];
 
-    const filledCount = prereqValues.filter(v => v !== '' && v !== null).length;
+    const filledCount =
+      prereqValues.filter(v => v !== '' && v !== null).length;
 
-    const hasTxnId = r[IDX.txnId];
+    // INVALID: partially filled transaction
+    if (filledCount > 0 && filledCount < prereqValues.length) {
 
-    // Partial prerequisite state + Txn_ID present → INVALID
-    if (filledCount > 0 && filledCount < prereqValues.length && hasTxnId) {
+      const snapshot = JSON.stringify(r);
 
-      const oldId = r[IDX.txnId];
-      output[i][IDX.txnId] = '';
-      cleared++;
+      // Clear entire row
+      output[i] = new Array(r.length).fill('');
+
+      deleted++;
 
       console.log(
-        `[${SCRIPT_NAME}] ROW ${rowNum} → CLEARED orphan Txn_ID_Machine: ${oldId}`
+        `[${SCRIPT_NAME}] ROW ${rowNum} → DELETED invalid transaction`
       );
 
       ETI_log_({
@@ -136,8 +136,8 @@ function cleanupInvalidTransactions_TransactionRaw() {
         sheetName: SHEET_NAME,
         level: 'WARN',
         rowNumber: rowNum,
-        action: 'CLEAR_INVALID_TXN',
-        details: `Cleared Txn_ID_Machine due to partial prerequisites: ${oldId}`
+        action: 'DELETE_INVALID_TXN',
+        details: `Invalid partial transaction deleted. Snapshot=${snapshot}`
       });
     }
   }
@@ -147,7 +147,7 @@ function cleanupInvalidTransactions_TransactionRaw() {
   const durationMs = new Date().getTime() - t0.getTime();
 
   console.log(
-    `[${SCRIPT_NAME}] Scanned=${scanned}, Cleared=${cleared}, DurationMs=${durationMs}`
+    `[${SCRIPT_NAME}] Scanned=${scanned}, Deleted=${deleted}, DurationMs=${durationMs}`
   );
 
   ETI_log_({
@@ -156,7 +156,7 @@ function cleanupInvalidTransactions_TransactionRaw() {
     sheetName: SHEET_NAME,
     level: 'INFO',
     action: 'SUMMARY',
-    details: `Scanned=${scanned}, Cleared=${cleared}, DurationMs=${durationMs}`
+    details: `Scanned=${scanned}, Deleted=${deleted}, DurationMs=${durationMs}`
   });
 
   ETI_log_({
