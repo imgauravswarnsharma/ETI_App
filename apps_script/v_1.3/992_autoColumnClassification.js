@@ -1,20 +1,44 @@
 /**
- * Column_Classification — Manifest-based
- * Uses Formula_Inventory v2 (text only)
+ * Script Name: classifyColumns_fromManifest
+ * Status: STABLE — ETI v1.3
  *
- * Layout:
- * Row 1  → Header (bold, written once)
- * Row 2  → empty
- * Row 3  → empty
- * Row 4+ → data
- * 2 empty rows inserted when Sheet_Name changes
+ * Purpose:
+ * - Generate Column_Classification as a READ-ONLY analytical artifact
+ * - Classify columns using Schema_Snapshot + Formula_Inventory (text-only)
+ *
+ * Explicit Non-Goals:
+ * - Does NOT mutate schemas
+ * - Does NOT write formulas
+ * - Does NOT manage header formatting (owned by sheet-level formatter)
+ * - Does NOT interact with AppSheet or transactional data
+ *
+ * Input Dependencies (Required):
+ * - Schema_Snapshot
+ * - Formula_Inventory (Formula_A1_Text)
+ *
+ * Output Contract:
+ * - Sheet: Column_Classification (fully regenerated each run)
+ * - Layout:
+ *   Row 1  → Header (values only; formatting handled elsewhere)
+ *   Row 2–3 → Reserved empty rows
+ *   Row 4+ → Data
+ *   Two empty separator rows inserted when Sheet_Name changes
+ *
+ * Cosmetic Rules (Intentional & Limited):
+ * - Separator rows are visually marked in columns A–E only
+ * - Purpose: improve human scanability between table blocks
+ * - No data rows or logic rows are ever styled
+ *
+ * Idempotency:
+ * - Safe to re-run; output is fully cleared and rebuilt
  */
+
 
 function classifyColumns_fromManifest() {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
-  const SCHEMA = ss.getSheetByName('Schema_Snapshot').getDataRange().getValues();
+  const SCHEMA   = ss.getSheetByName('Schema_Snapshot').getDataRange().getValues();
   const FORMULAS = ss.getSheetByName('Formula_Inventory').getDataRange().getValues();
 
   let out = ss.getSheetByName('Column_Classification');
@@ -30,9 +54,8 @@ function classifyColumns_fromManifest() {
     'Semantic_Class'
   ];
 
-  out.getRange(1, 1, 1, headers.length)
-     .setValues([headers])
-     .setFontWeight('bold');
+  // Header values only — NO formatting here
+  out.getRange(1, 1, 1, headers.length).setValues([headers]);
 
   // Build lookup: Sheet|ColIndex → Formula_A1_Text
   const formulaMap = {};
@@ -41,7 +64,7 @@ function classifyColumns_fromManifest() {
     formulaMap[`${sheet}|${colIdx}`] = (formulaA1 || '');
   }
 
-  let writeRow = 4;
+  let writeRow  = 4;
   let lastSheet = null;
 
   // Robust PASS_THROUGH detector (after normalization)
@@ -52,7 +75,13 @@ function classifyColumns_fromManifest() {
 
     const [sheet, colIdx, colLetter, colName] = SCHEMA[i];
 
+    // ---- Sheet boundary: insert 2 empty rows + visual marker ----
     if (lastSheet !== null && sheet !== lastSheet) {
+
+      // Mark the two separator rows (A:E only)
+      out.getRange(writeRow, 1, 2, 5)
+         .setBackground('#FFFF00'); // yellow color
+
       writeRow += 2;
     }
 
@@ -62,7 +91,7 @@ function classifyColumns_fromManifest() {
 
     if (rawFormula) {
 
-      // --- normalize whitespace (CRITICAL FIX) ---
+      // normalize whitespace
       const f = rawFormula.replace(/\s+/g, ' ').trim();
 
       if (/(XLOOKUP|VLOOKUP|INDEX|MATCH)\s*\(/i.test(f)) {
