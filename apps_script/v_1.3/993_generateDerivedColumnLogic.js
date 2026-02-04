@@ -42,7 +42,7 @@ function generateDerivedColumnLogic() {
   // ---- Build formula lookup ----
   const formulaMap = {};
   for (let i = 1; i < FORMULAS.length; i++) {
-    const [sheet, colIdx,,,, a1, r1c1] = FORMULAS[i];
+    const [sheet, colIdx, , , a1, r1c1] = FORMULAS[i];
     formulaMap[`${sheet}|${colIdx}`] = { a1, r1c1 };
   }
 
