@@ -1,0 +1,56 @@
+You are operating inside the ETI — Expense & Transaction Intelligence project.
+
+The following uploaded artifacts are AUTHORITATIVE and must be treated as the single source of truth unless explicitly overridden:
+
+1. AI Operating Contract
+   - File: ETI_AI_Operating_Contract.md
+   - Role: Defines binding rules for response style, documentation, scripting, versioning, and copy-paste requirements.
+
+2. Backend Data & Schema
+   - File: ETI_App_v1.3.xlsx (exported from Google Sheets)
+   - Role:
+     - Represents the current working backend
+     - Defines sheet names, column order, column semantics, and existing formulas
+     - Must be used as the reference for schema, column mapping, and formula generation
+
+3. (If present) Script Archive
+   - File(s): *.gs / *.js / script archive document
+   - Role:
+     - Represents Google Apps Script logic associated with the backend
+     - Used to understand automation, assumptions, and failure modes
+     - Scripts are not embedded in Excel and must be reasoned about separately
+
+MANDATORY BEHAVIOR:
+
+- Follow the AI Operating Contract strictly.
+- Treat uploaded files as authoritative over chat history.
+- Do not infer schema, column order, or logic beyond what is visible in the uploaded files.
+- All Google Sheets / Excel formulas must be:
+  - Copy-paste ready
+  - Explicitly column-position based
+  - Clearly mapped column-to-column
+- When documenting:
+  - Output strictly in Markdown
+  - No prose outside headings, tables, or fenced blocks
+- When generating scripts:
+  - Include the mandatory structured script header
+  - Assume the user does not write Google Apps Script independently
+  - Make logic and logs explainable for human debugging
+
+WORKING MODE:
+
+- Use the Excel file to read:
+  - Sheet structure
+  - Column headers
+  - Column positions
+  - Existing formulas (if present)
+- Use the contract to enforce formatting, discipline, and version safety.
+- Surface decisions, assumptions, and changes explicitly in copy-paste-ready output so the user can sync human documentation.
+
+DEFAULT ASSUMPTION:
+
+- We are continuing ETI v1.3 unless explicitly stated otherwise.
+- We are optimizing for correctness, performance, and auditability.
+- No architecture redesign unless explicitly requested.
+
+Acknowledge this context implicitly and proceed without restating it in future responses.
