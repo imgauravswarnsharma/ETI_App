@@ -13,6 +13,12 @@
  *
  * Input Dependencies:
  * - Active spreadsheet (all visible sheets)
+ * 
+ * Algorithm (Optimized – Logic Unchanged):
+ * 1. Clear output sheet
+ * 2. Build full output array in memory
+ * 3. Write once using setValues()
+ * 4. Apply separator formatting in batch
  *
  * Output Contract:
  * - Sheet: Schema_Snapshot (fully regenerated each run)
@@ -33,12 +39,13 @@
 
 function STEP3_exportSchemaSnapshot() {
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheets = ss.getSheets();
+  const dataSS = SpreadsheetApp.getActiveSpreadsheet();
+  const metaSS = getMetadataSpreadsheet_();
+  const sheets = dataSS.getSheets();
 
   const OUTPUT_SHEET_NAME = 'Schema_Snapshot';
-  let out = ss.getSheetByName(OUTPUT_SHEET_NAME);
-  if (!out) out = ss.insertSheet(OUTPUT_SHEET_NAME);
+  let out = metaSS.getSheetByName(OUTPUT_SHEET_NAME);
+  if (!out) out = metaSS.insertSheet(OUTPUT_SHEET_NAME);
 
   out.clear();
 
@@ -49,46 +56,60 @@ function STEP3_exportSchemaSnapshot() {
     'Header_Value'
   ];
 
-  // Header values only — formatting handled elsewhere
   out.getRange(1, 1, 1, headers.length).setValues([headers]);
 
-  let writeRow = 4;
+  let output = [];
+  let separatorRows = [];
   let lastSheetName = null;
 
   sheets.forEach(sh => {
 
     const sheetName = sh.getName();
+    const lastCol = sh.getLastColumn();
 
-    // ---- Insert visual separator between sheet blocks ----
-    if (lastSheetName !== null && sheetName !== lastSheetName) {
-
-      // Mark the two gap rows (A–D only)
-      out.getRange(writeRow, 1, 2, headers.length)
-         .setBackground('#FFFF00');
-
-      writeRow += 2;
+    if (lastCol === 0) {
+      lastSheetName = sheetName;
+      return;
     }
 
-    const headerRange = sh.getRange(1, 1, 1, sh.getLastColumn());
-    const headerValues = headerRange.getValues()[0];
+    // Insert separator (logical only for now)
+    if (lastSheetName !== null && sheetName !== lastSheetName) {
+      separatorRows.push(output.length + 4);
+      separatorRows.push(output.length + 5);
+      output.push(new Array(headers.length).fill(''));
+      output.push(new Array(headers.length).fill(''));
+    }
 
-    headerValues.forEach((header, idx) => {
-      out.getRange(writeRow, 1, 1, headers.length).setValues([[
+    const headerValues =
+      sh.getRange(1, 1, 1, lastCol).getValues()[0];
+
+    for (let idx = 0; idx < headerValues.length; idx++) {
+      output.push([
         sheetName,
         idx + 1,
         columnToLetter(idx + 1),
-        header
-      ]]);
-      writeRow++;
-    });
+        headerValues[idx]
+      ]);
+    }
 
     lastSheetName = sheetName;
+  });
+
+  // Single batch write
+  if (output.length > 0) {
+    out.getRange(4, 1, output.length, headers.length)
+       .setValues(output);
+  }
+
+  // Apply separator formatting in batch
+  separatorRows.forEach(r => {
+    out.getRange(r, 1, 1, headers.length)
+       .setBackground('#FFFF00');
   });
 }
 
 /**
  * Utility: Convert column number to letter (1 → A, 27 → AA)
- * Pure utility — no side effects
  */
 function columnToLetter(column) {
   let temp = '';

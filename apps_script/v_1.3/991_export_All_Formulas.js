@@ -40,14 +40,16 @@
 
 function exportFormulaInventory_v2_manifest() {
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheets = ss.getSheets();
+  const dataSS = SpreadsheetApp.getActiveSpreadsheet();
+  const metaSS = getMetadataSpreadsheet_();
+
+  const sheets = dataSS.getSheets();
+
 
   const OUTPUT_SHEET = 'Formula_Inventory';
-  let out = ss.getSheetByName(OUTPUT_SHEET);
-  if (!out) out = ss.insertSheet(OUTPUT_SHEET);
-
-  // Full reset (values + formatting)
+  let out = metaSS.getSheetByName(OUTPUT_SHEET);
+  if (!out) out = metaSS.insertSheet(OUTPUT_SHEET);
+  
   out.clear();
 
   const headers = [
@@ -59,10 +61,10 @@ function exportFormulaInventory_v2_manifest() {
     'Formula_R1C1_Text'
   ];
 
-  // Header values only — formatting handled elsewhere
   out.getRange(1, 1, 1, headers.length).setValues([headers]);
 
-  let writeRow = 4;
+  let output = [];
+  let separatorRows = [];
   let lastSheetName = null;
 
   sheets.forEach(sh => {
@@ -70,66 +72,51 @@ function exportFormulaInventory_v2_manifest() {
     const sheetName = sh.getName();
     const lastCol = sh.getLastColumn();
 
-    // Skip sheets with no columns
     if (lastCol === 0) {
       lastSheetName = sheetName;
       return;
     }
 
-    // ---- Insert visual separator between sheet blocks ----
     if (lastSheetName !== null && sheetName !== lastSheetName) {
-
-      // Mark the two gap rows (A–F only)
-      out.getRange(writeRow, 1, 2, headers.length)
-         .setBackground('#FFFF00');
-
-      writeRow += 2;
+      separatorRows.push(output.length + 4); // +4 because metadata starts row 4
+      separatorRows.push(output.length + 5);
+      output.push(new Array(headers.length).fill(''));
+      output.push(new Array(headers.length).fill(''));
     }
 
     const headersRow = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+    const formulaA1 = sh.getRange(2, 1, 1, lastCol).getFormulas()[0];
+    const formulaR1C1 = sh.getRange(2, 1, 1, lastCol).getFormulasR1C1()[0];
 
     for (let col = 1; col <= lastCol; col++) {
 
-      const cell = sh.getRange(2, col);
+      let fA1 = formulaA1[col - 1] || '';
+      let fR1C1 = formulaR1C1[col - 1] || '';
 
-      let formulaA1 = cell.getFormula() || '';
-      let formulaR1C1 = cell.getFormulaR1C1() || '';
+      if (fA1.startsWith('=')) fA1 = fA1.slice(1);
+      if (fR1C1.startsWith('=')) fR1C1 = fR1C1.slice(1);
 
-      // Strip leading "=" to enforce manifest mode
-      if (formulaA1.startsWith('=')) {
-        formulaA1 = formulaA1.slice(1);
-      }
-      if (formulaR1C1.startsWith('=')) {
-        formulaR1C1 = formulaR1C1.slice(1);
-      }
-
-      out.getRange(writeRow, 1, 1, headers.length).setValues([[
+      output.push([
         sheetName,
         col,
         columnToLetter(col),
         headersRow[col - 1] || '',
-        formulaA1,
-        formulaR1C1
-      ]]);
-
-      writeRow++;
+        fA1,
+        fR1C1
+      ]);
     }
 
     lastSheetName = sheetName;
   });
-}
 
-/**
- * Utility: Convert column number to letter (1 → A, 27 → AA)
- * Pure utility — no side effects
- */
-function columnToLetter(column) {
-  let temp = '';
-  let letter = '';
-  while (column > 0) {
-    temp = (column - 1) % 26;
-    letter = String.fromCharCode(temp + 65) + letter;
-    column = (column - temp - 1) / 26;
+  if (output.length > 0) {
+    out.getRange(4, 1, output.length, headers.length)
+       .setValues(output);
   }
-  return letter;
+
+  // Apply separator background in batch
+  separatorRows.forEach(r => {
+    out.getRange(r, 1, 1, headers.length)
+       .setBackground('#FFFF00');
+  });
 }

@@ -1,18 +1,34 @@
 /**
- * Config_Data_Validation — Manifest Extract v1
- * Read-only, safe
- */
+ * Script Name: extractDataValidationConfig
+ * Script Language: Google Apps Script (JavaScript)
+ * Version Introduced: v1
+ * Current Status: ACTIVE (Performance Optimized)
+ *
+ * Purpose:
+ * - Extract data validation configuration as read-only manifest
+ *
+ * Preconditions:
+ * - Schema_Snapshot exists
+ *
+ * Algorithm (Optimized – Logic Unchanged):
+ * 1. Build schema lookup
+ * 2. Scan sheets for validation rules
+ * 3. Build output in memory
+ * 4. Single batch write
+ *
+ */ 
 
 function extractDataValidationConfig() {
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const dataSS = SpreadsheetApp.getActiveSpreadsheet();
+  const metaSS = getMetadataSpreadsheet_();
 
-  const SCHEMA = ss.getSheetByName('Schema_Snapshot')
+  const SCHEMA = metaSS.getSheetByName('Schema_Snapshot')
                    .getDataRange()
                    .getValues();
 
-  let out = ss.getSheetByName('Config_Data_Validation');
-  if (!out) out = ss.insertSheet('Config_Data_Validation');
+  let out = metaSS.getSheetByName('Config_Data_Validation');
+  if (!out) out = metaSS.insertSheet('Config_Data_Validation');
   out.clear();
 
   const headers = [
@@ -33,14 +49,14 @@ function extractDataValidationConfig() {
   let writeRow = 4;
   let lastSheet = null;
 
-  // Build schema lookup: Sheet|ColIndex → { letter, name }
+/* ===================== BUILD SCHEMA LOOKUP ===================== */
   const schemaMap = {};
   for (let i = 1; i < SCHEMA.length; i++) {
     const [sheet, idx, letter, name] = SCHEMA[i];
     schemaMap[`${sheet}|${idx}`] = { letter, name };
   }
 
-  ss.getSheets().forEach(sh => {
+  dataSS.getSheets().forEach(sh => {
 
     const sheetName = sh.getName();
     const maxCols = sh.getMaxColumns();

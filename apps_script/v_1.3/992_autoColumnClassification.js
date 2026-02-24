@@ -16,6 +16,13 @@
  * - Schema_Snapshot
  * - Formula_Inventory (Formula_A1_Text)
  *
+ * Algorithm (Optimized – Logic Unchanged):
+ * 1. Read Schema + Formula inventory
+ * 2. Build formula lookup map
+ * 3. Build full classification output in memory
+ * 4. Single batch write
+ * 5. Apply separator formatting in batch
+ * 
  * Output Contract:
  * - Sheet: Column_Classification (fully regenerated each run)
  * - Layout:
@@ -36,13 +43,21 @@
 
 function classifyColumns_fromManifest() {
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const dataSS = SpreadsheetApp.getActiveSpreadsheet();
+  const metaSS = getMetadataSpreadsheet_();
 
-  const SCHEMA   = ss.getSheetByName('Schema_Snapshot').getDataRange().getValues();
-  const FORMULAS = ss.getSheetByName('Formula_Inventory').getDataRange().getValues();
+  const SCHEMA_SHEET   = metaSS.getSheetByName('Schema_Snapshot');
+  const FORMULA_SHEET  = metaSS.getSheetByName('Formula_Inventory');
 
-  let out = ss.getSheetByName('Column_Classification');
-  if (!out) out = ss.insertSheet('Column_Classification');
+  if (!SCHEMA_SHEET || !FORMULA_SHEET) {
+    throw new Error('Required dependency sheet missing');
+  }
+
+  const SCHEMA   = SCHEMA_SHEET.getDataRange().getValues();
+  const FORMULAS = FORMULA_SHEET.getDataRange().getValues();
+
+  let out = metaSS.getSheetByName('Column_Classification');
+  if (!out) out = metaSS.insertSheet('Column_Classification');
 
   out.clear();
 
@@ -54,35 +69,38 @@ function classifyColumns_fromManifest() {
     'Semantic_Class'
   ];
 
-  // Header values only — NO formatting here
   out.getRange(1, 1, 1, headers.length).setValues([headers]);
 
-  // Build lookup: Sheet|ColIndex → Formula_A1_Text
+  /* =========================================================
+     BUILD FORMULA LOOKUP MAP
+  ========================================================== */
+
   const formulaMap = {};
   for (let i = 1; i < FORMULAS.length; i++) {
     const [sheet, colIdx,,,, formulaA1] = FORMULAS[i];
     formulaMap[`${sheet}|${colIdx}`] = (formulaA1 || '');
   }
 
-  let writeRow  = 4;
-  let lastSheet = null;
+  /* =========================================================
+     CLASSIFICATION BUILD (IN MEMORY)
+  ========================================================== */
 
-  // Robust PASS_THROUGH detector (after normalization)
   const PASS_THROUGH_REGEX =
     /^IF\s*\(\s*[^,]+,\s*(?:[A-Z0-9_]+!)?\$?[A-Z]+\$?\d+\s*,\s*""\s*\)$/i;
+
+  let output = [];
+  let separatorRows = [];
+  let lastSheet = null;
 
   for (let i = 1; i < SCHEMA.length; i++) {
 
     const [sheet, colIdx, colLetter, colName] = SCHEMA[i];
 
-    // ---- Sheet boundary: insert 2 empty rows + visual marker ----
     if (lastSheet !== null && sheet !== lastSheet) {
-
-      // Mark the two separator rows (A:E only)
-      out.getRange(writeRow, 1, 2, 5)
-         .setBackground('#FFFF00'); // yellow color
-
-      writeRow += 2;
+      separatorRows.push(output.length + 4);
+      separatorRows.push(output.length + 5);
+      output.push(new Array(headers.length).fill(''));
+      output.push(new Array(headers.length).fill(''));
     }
 
     const rawFormula = formulaMap[`${sheet}|${colIdx}`];
@@ -91,7 +109,6 @@ function classifyColumns_fromManifest() {
 
     if (rawFormula) {
 
-      // normalize whitespace
       const f = rawFormula.replace(/\s+/g, ' ').trim();
 
       if (/(XLOOKUP|VLOOKUP|INDEX|MATCH)\s*\(/i.test(f)) {
@@ -105,15 +122,32 @@ function classifyColumns_fromManifest() {
       }
     }
 
-    out.getRange(writeRow, 1, 1, headers.length).setValues([[
+    output.push([
       sheet,
       colIdx,
       colLetter,
       colName,
       cls
-    ]]);
+    ]);
 
     lastSheet = sheet;
-    writeRow++;
   }
+
+  /* =========================================================
+     SINGLE BATCH WRITE
+  ========================================================== */
+
+  if (output.length > 0) {
+    out.getRange(4, 1, output.length, headers.length)
+       .setValues(output);
+  }
+
+  /* =========================================================
+     BATCH SEPARATOR FORMATTING
+  ========================================================== */
+
+  separatorRows.forEach(r => {
+    out.getRange(r, 1, 1, headers.length)
+       .setBackground('#FFFF00');
+  });
 }

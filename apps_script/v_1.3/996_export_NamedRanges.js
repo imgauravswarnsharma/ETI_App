@@ -5,10 +5,11 @@
 
 function extractNamedRangesConfig() {
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const dataSS = SpreadsheetApp.getActiveSpreadsheet();
+  const metaSS = getMetadataSpreadsheet_();
 
-  let out = ss.getSheetByName('Config_Named_Ranges');
-  if (!out) out = ss.insertSheet('Config_Named_Ranges');
+  let out = metaSS.getSheetByName('Config_Named_Ranges');
+  if (!out) out = metaSS.insertSheet('Config_Named_Ranges');
   out.clear();
 
   const headers = [
@@ -23,7 +24,7 @@ function extractNamedRangesConfig() {
 
   let writeRow = 4;
 
-  const namedRanges = ss.getNamedRanges();
+  const namedRanges = dataSS.getNamedRanges();
 
   namedRanges.forEach(nr => {
     const range = nr.getRange();

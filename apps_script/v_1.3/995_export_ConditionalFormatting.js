@@ -1,14 +1,28 @@
 /**
- * Config_Conditional_Formatting — Manifest Extract v1 (API-safe)
- * Read-only, safe
+ * Script Name: extractConditionalFormattingConfig
+ * Script Language: Google Apps Script (JavaScript)
+ * Version Introduced: v1
+ * Current Status: ACTIVE (Performance Optimized)
+ *
+ * Purpose:
+ * - Extract conditional formatting configuration as read-only manifest
+ *
+ * Preconditions:
+ * - Active spreadsheet
+ *
+ * Algorithm (Optimized – Logic Unchanged):
+ * 1. Read conditional rules per sheet
+ * 2. Build output in memory
+ * 3. Single batch write
  */
 
 function extractConditionalFormattingConfig() {
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const dataSS = SpreadsheetApp.getActiveSpreadsheet();
+  const metaSS = getMetadataSpreadsheet_();
 
-  let out = ss.getSheetByName('Config_Conditional_Formatting');
-  if (!out) out = ss.insertSheet('Config_Conditional_Formatting');
+  let out = metaSS.getSheetByName('Config_Conditional_Formatting');
+  if (!out) out = metaSS.insertSheet('Config_Conditional_Formatting');
   out.clear();
 
   const headers = [
@@ -23,17 +37,18 @@ function extractConditionalFormattingConfig() {
      .setValues([headers])
      .setFontWeight('bold');
 
-  let writeRow = 4;
+  let output = [];
   let lastSheet = null;
 
-  ss.getSheets().forEach(sh => {
+  dataSS.getSheets().forEach(sh => {
 
     const sheetName = sh.getName();
     const rules = sh.getConditionalFormatRules();
     if (!rules || rules.length === 0) return;
 
     if (lastSheet !== null && sheetName !== lastSheet) {
-      writeRow += 2;
+      output.push(new Array(headers.length).fill(''));
+      output.push(new Array(headers.length).fill(''));
     }
 
     rules.forEach(rule => {
@@ -57,24 +72,30 @@ function extractConditionalFormattingConfig() {
 
       if (gradientCond) {
         ruleType = 'GRADIENT';
+
+        const midPoint = gradientCond.getMidpoint();
+
         notes = [
           `MinColor=${gradientCond.getMinColor()}`,
-          gradientCond.getMidColor() ? `MidColor=${gradientCond.getMidColor()}` : '',
+          midPoint && midPoint.getColor() ? `MidColor=${midPoint.getColor()}` : '',
           `MaxColor=${gradientCond.getMaxColor()}`
         ].filter(Boolean).join(' ; ');
       }
 
-      out.getRange(writeRow, 1, 1, headers.length).setValues([[
+      output.push([
         sheetName,
         ranges,
         ruleType,
         criteria,
         notes
-      ]]);
-
-      writeRow++;
+      ]);
     });
 
     lastSheet = sheetName;
   });
+
+  if (output.length > 0) {
+    out.getRange(4, 1, output.length, headers.length)
+       .setValues(output);
+  }
 }
