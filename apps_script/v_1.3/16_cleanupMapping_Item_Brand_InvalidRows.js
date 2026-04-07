@@ -19,18 +19,23 @@
  *   - Brand_ID_Machine
  *
  * Algorithm (Step-by-Step):
+ *
  * 1. Generate Execution_ID for traceability.
- * 2. Read Mapping_Item_Brand into memory.
- * 3. Resolve column indexes from headers.
- * 4. Identify rows where Item_ID_Machine OR Brand_ID_Machine is blank.
- * 5. Delete those rows (bottom-up to preserve indexes).
- * 6. Emit summary and completion logs.
+ * 2. Load Mapping_Item_Brand sheet.
+ * 3. Resolve column indexes using header names.
+ * 4. Scan all rows and identify invalid records:
+ *      Item_ID_Machine missing
+ *      OR
+ *      Brand_ID_Machine missing
+ * 5. Collect row numbers to delete.
+ * 6. Delete rows in reverse order (bottom-up).
+ * 7. Emit execution summary and completion logs.
  *
  * Failure Modes:
  * - Mapping_Item_Brand sheet not found
- * - Required columns missing
+ * - Required column missing
  *
- * Reason for Deprecation (if applicable):
+ * Reason for Deprecation:
  * - N/A
  */
 
@@ -41,6 +46,7 @@ function cleanupMapping_Item_Brand_InvalidRows() {
   const MAP_SHEET    = 'Mapping_Item_Brand';
 
   const t0 = new Date();
+
   console.log(`[${SCRIPT_NAME}] START`);
 
   ETI_log_({
@@ -52,50 +58,60 @@ function cleanupMapping_Item_Brand_InvalidRows() {
     details: 'Execution started'
   });
 
-  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
   const mapSh = ss.getSheetByName(MAP_SHEET);
 
   if (!mapSh) {
-    throw new Error(`Sheet ${MAP_SHEET} not found`);
+    throw new Error(`Sheet not found: ${MAP_SHEET}`);
   }
 
-  const dataRange = mapSh.getDataRange();
-  const data      = dataRange.getValues();
+  const data = mapSh.getDataRange().getValues();
 
   if (data.length < 2) {
+
     ETI_log_({
       executionId: EXECUTION_ID,
       scriptName: SCRIPT_NAME,
       sheetName: MAP_SHEET,
       level: 'INFO',
       action: 'EXIT',
-      details: 'No data rows found'
+      details: 'No data rows present'
     });
+
     return;
   }
 
   const header = data[0];
-  const col = name => header.indexOf(name);
+  const col = n => header.indexOf(n);
 
   const IDX = {
     itemId: col('Item_ID_Machine'),
     brandId: col('Brand_ID_Machine')
   };
 
-  for (const [k, v] of Object.entries(IDX)) {
-    if (v === -1) {
-      throw new Error(`Missing required column: ${k}`);
+  for (const [key, idx] of Object.entries(IDX)) {
+
+    if (idx === -1) {
+      throw new Error(
+        `Missing required column: ${
+          key === 'itemId'
+            ? 'Item_ID_Machine'
+            : 'Brand_ID_Machine'
+        }`
+      );
     }
   }
 
-  /* ======================================================
+  /* =========================
      IDENTIFY INVALID ROWS
-     ====================================================== */
+     ========================= */
 
   const rowsToDelete = [];
 
   for (let i = 1; i < data.length; i++) {
+
     const rowNum = i + 1;
+
     const itemId  = data[i][IDX.itemId];
     const brandId = data[i][IDX.brandId];
 
@@ -104,12 +120,23 @@ function cleanupMapping_Item_Brand_InvalidRows() {
     }
   }
 
-  /* ======================================================
-     DELETE (BOTTOM-UP)
-     ====================================================== */
+  /* =========================
+     DELETE ROWS (BOTTOM-UP)
+     ========================= */
 
   for (let i = rowsToDelete.length - 1; i >= 0; i--) {
+
     mapSh.deleteRow(rowsToDelete[i]);
+
+    ETI_log_({
+      executionId: EXECUTION_ID,
+      scriptName: SCRIPT_NAME,
+      sheetName: MAP_SHEET,
+      level: 'WARN',
+      rowNumber: rowsToDelete[i],
+      action: 'DELETE_INVALID_ROW',
+      details: 'Missing Item_ID_Machine or Brand_ID_Machine'
+    });
   }
 
   const durationMs = new Date().getTime() - t0.getTime();

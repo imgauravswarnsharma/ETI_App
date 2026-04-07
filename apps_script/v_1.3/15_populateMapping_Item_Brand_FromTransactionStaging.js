@@ -1,215 +1,305 @@
 /**
- * Script Name: populateMapping_Item_Brand_FromTransactionStaging
+ * Script Name: populateMapping_Item_Brand_FromTransactionResolution
  * Script Language: Google Apps Script (JavaScript)
  * Version Introduced: v1.3
  * Current Status: ACTIVE
  *
  * Purpose:
- * - Populate Mapping_Item_Brand with unique Item–Brand relationships
- *   discovered from Transaction_Staging
- * - One row per (Item_ID_Machine, Brand_ID_Machine)
- * - Transaction acts strictly as discovery context (first-seen evidence)
+ * - Discover Item ↔ Brand relationships observed in Transaction_Resolution
+ * - Insert mapping rows into Mapping_Item_Brand
+ * - Preserve first-seen transaction evidence
+ * - Capture canonical snapshots for audit visibility
+ *
+ * Mapping Identity:
+ * (Item_ID_Machine, Brand_ID_Machine)
  *
  * Preconditions:
- * - Sheets must exist:
- *   - Transaction_Staging
- *   - Mapping_Item_Brand
+ * - Sheet must exist: Transaction_Resolution
+ * - Sheet must exist: Mapping_Item_Brand
  * - Header row must exist in row 1
- * - Required columns must exist (header-based, order-independent)
+ *
+ * Required columns in Transaction_Resolution:
+ * - Txn_ID_Machine
+ * - Created_At
+ * - Item_ID_Machine
+ * - Brand_ID_Machine
+ * - Item_Name_Canonical
+ * - Brand_Name_Canonical
+ *
+ * Required columns in Mapping_Item_Brand:
+ * - Item_Name_Canonical
+ * - Brand_Name_Canonical
+ * - Item_Status_Snapshot
+ * - Brand_Status_Snapshot
+ * - Is_Mapping_Active
+ * - Is_Analytics_Enabled
+ * - Is_Archived
+ * - Created_At
+ * - Notes
+ * - First_Seen_Txn_Date
+ * - First_Seen_Txn_ID
+ * - Item_ID_Machine
+ * - Brand_ID_Machine
  *
  * Algorithm (Step-by-Step):
- * 1. Generate Execution_ID for traceability.
- * 2. Read Mapping_Item_Brand and build an in-memory set of existing
- *    (Item_ID_Machine, Brand_ID_Machine) pairs.
- * 3. Read Transaction_Staging and iterate rows in order:
- *    a. Skip rows without Txn_ID_Machine.
- *    b. Skip rows without Item_ID_Machine or Brand_ID_Machine.
- *    c. Capture the first-seen Item–Brand pair only once.
- * 4. Append new mapping rows for unseen pairs with:
- *    - First_Seen_Txn_ID
- *    - First_Seen_Txn_Date
- *    - Canonical snapshots (descriptive only)
- * 5. Batch-write all new rows.
- * 6. Emit execution summary and completion logs.
+ *
+ * 1. Load Mapping_Item_Brand and resolve column indexes.
+ * 2. Build in-memory Set of existing mapping identities:
+ *      Item_ID_Machine + Brand_ID_Machine
+ *
+ * 3. Load Transaction_Resolution rows.
+ *
+ * 4. Iterate each transaction:
+ *
+ *    Skip if:
+ *      - Txn_ID_Machine missing
+ *      - Item_ID_Machine missing
+ *      - Brand_ID_Machine missing
+ *
+ * 5. Construct mapping identity key.
+ *
+ *    If identity already exists:
+ *       → skip row
+ *
+ * 6. Create new mapping row:
+ *
+ *      Item_Name_Canonical
+ *      Brand_Name_Canonical
+ *
+ *      Item_Status_Snapshot  = ""
+ *      Brand_Status_Snapshot = ""
+ *
+ *      Is_Mapping_Active     = TRUE
+ *      Is_Analytics_Enabled  = TRUE
+ *      Is_Archived           = FALSE
+ *
+ *      Created_At = NOW()
+ *      Notes      = "Discovered from Transaction_Resolution"
+ *
+ *      First_Seen_Txn_Date
+ *      First_Seen_Txn_ID
+ *
+ *      Item_ID_Machine
+ *      Brand_ID_Machine
+ *
+ * 7. Append rows in batch.
+ *
+ * 8. Emit execution summary and completion logs.
  *
  * Failure Modes:
  * - Required sheet missing
  * - Required column missing
  *
- * Reason for Deprecation (if applicable):
+ * Reason for Deprecation:
  * - N/A
- * - Script remains ACTIVE for ETI v1.3.
- * - Superseded only if mapping discovery becomes event-driven in v1.4.
  */
 
-function populateMapping_Item_Brand_FromTransactionStaging() {
+function populateMapping_Item_Brand_FromTransactionResolution() {
 
   const EXECUTION_ID = Utilities.getUuid();
-  const SCRIPT_NAME  = 'populateMapping_Item_Brand_FromTransactionStaging';
-  const TXN_SHEET    = 'Transaction_Staging';
-  const MAP_SHEET    = 'Mapping_Item_Brand';
+  const SCRIPT_NAME  = 'populateMapping_Item_Brand_FromTransactionResolution';
+
+  const TXN_SHEET = 'Transaction_Resolution';
+  const MAP_SHEET = 'Mapping_Item_Brand';
 
   const t0 = new Date();
+
   console.log(`[${SCRIPT_NAME}] START`);
 
-  ETI_log_({
-    executionId: EXECUTION_ID,
-    scriptName: SCRIPT_NAME,
-    sheetName: MAP_SHEET,
-    level: 'INFO',
-    action: 'START',
-    details: 'Execution started'
-  });
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const txSh = ss.getSheetByName(TXN_SHEET);
+  const mpSh = ss.getSheetByName(MAP_SHEET);
 
-  const ss    = SpreadsheetApp.getActiveSpreadsheet();
-  const tsSh  = ss.getSheetByName(TXN_SHEET);
-  const mapSh = ss.getSheetByName(MAP_SHEET);
-
-  if (!tsSh || !mapSh) {
+  if (!txSh || !mpSh) {
     throw new Error('Required sheet not found');
   }
 
-  /* ======================================================
-     READ EXISTING MAPPINGS (DEDUP SET)
-     ====================================================== */
+  /* =========================
+     READ MAPPING TABLE
+     ========================= */
 
-  const mapData = mapSh.getDataRange().getValues();
-  const mapHdr  = mapData[0];
-  const mapCol  = n => mapHdr.indexOf(n);
+  const mpData = mpSh.getDataRange().getValues();
+  const mpHdr  = mpData[0];
+  const mpCol  = n => mpHdr.indexOf(n);
 
   const IDX_MAP = {
-    itemId: mapCol('Item_ID_Machine'),
-    brandId: mapCol('Brand_ID_Machine')
+
+    itemCanon: mpCol('Item_Name_Canonical'),
+    brandCanon: mpCol('Brand_Name_Canonical'),
+
+    itemStatus: mpCol('Item_Status_Snapshot'),
+    brandStatus: mpCol('Brand_Status_Snapshot'),
+
+    mapActive: mpCol('Is_Mapping_Active'),
+    analytics: mpCol('Is_Analytics_Enabled'),
+    archived: mpCol('Is_Archived'),
+
+    createdAt: mpCol('Created_At'),
+    notes: mpCol('Notes'),
+
+    firstSeenDate: mpCol('First_Seen_Txn_Date'),
+    firstSeenTxn: mpCol('First_Seen_Txn_ID'),
+
+    itemId: mpCol('Item_ID_Machine'),
+    brandId: mpCol('Brand_ID_Machine')
   };
 
-  for (const [k, v] of Object.entries(IDX_MAP)) {
-    if (v === -1) {
-      throw new Error(`Mapping_Item_Brand missing column: ${k}`);
-    }
+  for (const [k,v] of Object.entries(IDX_MAP)) {
+    if (v === -1) throw new Error(`Mapping_Item_Brand missing column: ${k}`);
   }
+
+  /* =========================
+     BUILD EXISTING IDENTITY SET
+     ========================= */
 
   const existingSet = new Set();
-  for (let i = 1; i < mapData.length; i++) {
-    const itemId  = mapData[i][IDX_MAP.itemId];
-    const brandId = mapData[i][IDX_MAP.brandId];
-    if (itemId && brandId) {
-      existingSet.add(itemId + '|' + brandId);
-    }
+
+  for (let i = 1; i < mpData.length; i++) {
+
+    const itemId = mpData[i][IDX_MAP.itemId];
+    const brandId = mpData[i][IDX_MAP.brandId];
+
+    if (!itemId || !brandId) continue;
+
+    const key = `${itemId}||${brandId}`;
+
+    existingSet.add(key);
   }
 
-  /* ======================================================
-     READ TRANSACTION STAGING
-     ====================================================== */
+  /* =========================
+     READ TRANSACTION RESOLUTION
+     ========================= */
 
-  const tsData = tsSh.getDataRange().getValues();
-  const tsHdr  = tsData[0];
-  const tsCol  = n => tsHdr.indexOf(n);
+  const txData = txSh.getDataRange().getValues();
+  const txHdr  = txData[0];
+  const txCol  = n => txHdr.indexOf(n);
 
-  const IDX_TS = {
-    txnId: tsCol('Txn_ID_Machine'),
-    txnDate: tsCol('Txn_Date_Entered'),
-    itemId: tsCol('Item_ID_Machine'),
-    brandId: tsCol('Brand_ID_Machine'),
-    itemCanon: tsCol('Item_Name_Canonical'),
-    brandCanon: tsCol('Brand_Name_Canonical')
+  const IDX_TX = {
+
+    txnId: txCol('Txn_ID_Machine'),
+
+    txnDateEntered: txCol('Txn_Date_Entered'),
+    createdAt: txCol('Created_At'),
+
+    itemId: txCol('Item_ID_Machine'),
+    brandId: txCol('Brand_ID_Machine'),
+
+    itemCanon: txCol('Item_Name_Canonical'),
+    brandCanon: txCol('Brand_Name_Canonical')
   };
 
-
-  for (const [k, v] of Object.entries(IDX_TS)) {
+  for (const [k,v] of Object.entries(IDX_TX)) {
     if (v === -1) {
-      throw new Error(`Transaction_Staging missing column: ${k}`);
+      throw new Error(`Transaction_Resolution missing column: ${k}`);
     }
   }
 
-  /* ======================================================
-     DISCOVERY LOOP (FIRST-SEEN PER PAIR)
-     ====================================================== */
+  /* =========================
+     COUNTERS
+     ========================= */
 
-  const firstSeenMap = new Map();
   let scanned = 0;
-
-  for (let i = 1; i < tsData.length; i++) {
-    scanned++;
-    const r = tsData[i];
-
-    if (!r[IDX_TS.txnId]) continue;
-    if (!r[IDX_TS.itemId] || !r[IDX_TS.brandId]) continue;
-
-    const key = r[IDX_TS.itemId] + '|' + r[IDX_TS.brandId];
-    if (firstSeenMap.has(key)) continue;
-
-    firstSeenMap.set(key, {
-      itemId: r[IDX_TS.itemId],
-      brandId: r[IDX_TS.brandId],
-      txnId: r[IDX_TS.txnId],
-      txnDate: r[IDX_TS.txnDate] || '',
-      itemCanon: r[IDX_TS.itemCanon] || '',
-      brandCanon: r[IDX_TS.brandCanon] || ''
-    });
-  }
-
-  /* ======================================================
-     BUILD ROWS TO APPEND
-     ====================================================== */
+  let skipNoTxn = 0;
+  let skipNoItem = 0;
+  let skipNoBrand = 0;
+  let skipDuplicate = 0;
 
   const rowsToAppend = [];
-  let appended = 0;
 
-  for (const [key, v] of firstSeenMap.entries()) {
-    if (existingSet.has(key)) continue;
+  /* =========================
+     DISCOVERY LOOP
+     ========================= */
 
-    const newRow = new Array(mapHdr.length).fill('');
+  for (let i = 1; i < txData.length; i++) {
 
-    newRow[mapCol('Item_ID_Machine')]        = v.itemId;
-    newRow[mapCol('Brand_ID_Machine')]       = v.brandId;
-    newRow[mapCol('First_Seen_Txn_ID')]      = v.txnId;
-    newRow[mapCol('First_Seen_Txn_Date')]    = v.txnDate;
-    newRow[mapCol('Item_Name_Canonical')]    = v.itemCanon;
-    newRow[mapCol('Brand_Name_Canonical')]   = v.brandCanon;
-    newRow[mapCol('Is_Mapping_Active')]      = true;
-    newRow[mapCol('Is_Archived')]            = false;
-    newRow[mapCol('Created_At')]             = new Date();
-    newRow[mapCol('Notes')]                  = 'Discovered from transaction';
+    scanned++;
 
-    rowsToAppend.push(newRow);
+    const r = txData[i];
+
+    const txnId = r[IDX_TX.txnId];
+    const itemId = r[IDX_TX.itemId];
+    const brandId = r[IDX_TX.brandId];
+
+    if (!txnId) {
+      skipNoTxn++;
+      continue;
+    }
+
+    if (!itemId) {
+      skipNoItem++;
+      continue;
+    }
+
+    if (!brandId) {
+      skipNoBrand++;
+      continue;
+    }
+
+    const key = `${itemId}||${brandId}`;
+
+    if (existingSet.has(key)) {
+      skipDuplicate++;
+      continue;
+    }
+
+    const row = new Array(mpHdr.length).fill('');
+
+    row[IDX_MAP.itemCanon] = r[IDX_TX.itemCanon];
+    row[IDX_MAP.brandCanon] = r[IDX_TX.brandCanon];
+
+    row[IDX_MAP.itemStatus] = '';
+    row[IDX_MAP.brandStatus] = '';
+
+    row[IDX_MAP.mapActive] = true;
+    row[IDX_MAP.analytics] = true;
+    row[IDX_MAP.archived] = false;
+
+    row[IDX_MAP.createdAt] = new Date();
+    row[IDX_MAP.notes] = 'Discovered from Transaction_Resolution';
+
+    let firstSeenDate = r[IDX_TX.txnDateEntered];
+
+    if (!firstSeenDate) {
+      firstSeenDate = r[IDX_TX.createdAt];
+    }
+
+    if (!firstSeenDate) {
+      firstSeenDate = new Date();
+    }
+
+row[IDX_MAP.firstSeenDate] = firstSeenDate;
+    row[IDX_MAP.firstSeenTxn] = txnId;
+
+    row[IDX_MAP.itemId] = itemId;
+    row[IDX_MAP.brandId] = brandId;
+
+    rowsToAppend.push(row);
+
     existingSet.add(key);
-    appended++;
   }
 
-  /* ======================================================
-     WRITE MAPPINGS
-     ====================================================== */
+  /* =========================
+     BATCH APPEND
+     ========================= */
 
   if (rowsToAppend.length > 0) {
-    mapSh.getRange(
-      mapSh.getLastRow() + 1,
+
+    mpSh.getRange(
+      mpSh.getLastRow() + 1,
       1,
       rowsToAppend.length,
-      rowsToAppend[0].length
+      mpHdr.length
     ).setValues(rowsToAppend);
   }
 
   const durationMs = new Date().getTime() - t0.getTime();
 
-  console.log(
-    `[${SCRIPT_NAME}] Scanned=${scanned}, Added=${appended}, DurationMs=${durationMs}`
-  );
+  console.log(`[${SCRIPT_NAME}] Rows scanned: ${scanned}`);
+  console.log(`[${SCRIPT_NAME}] Skipped no Txn_ID: ${skipNoTxn}`);
+  console.log(`[${SCRIPT_NAME}] Skipped no Item_ID: ${skipNoItem}`);
+  console.log(`[${SCRIPT_NAME}] Skipped no Brand_ID: ${skipNoBrand}`);
+  console.log(`[${SCRIPT_NAME}] Skipped duplicate: ${skipDuplicate}`);
+  console.log(`[${SCRIPT_NAME}] Rows appended: ${rowsToAppend.length}`);
+  console.log(`[${SCRIPT_NAME}] END – Duration(ms): ${durationMs}`);
 
-  ETI_log_({
-    executionId: EXECUTION_ID,
-    scriptName: SCRIPT_NAME,
-    sheetName: MAP_SHEET,
-    level: 'INFO',
-    action: 'SUMMARY',
-    details: `Scanned=${scanned}, Added=${appended}, DurationMs=${durationMs}`
-  });
-
-  ETI_log_({
-    executionId: EXECUTION_ID,
-    scriptName: SCRIPT_NAME,
-    sheetName: MAP_SHEET,
-    level: 'INFO',
-    action: 'END',
-    details: 'Execution completed successfully'
-  });
 }

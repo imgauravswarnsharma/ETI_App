@@ -1,3 +1,4 @@
+
 /* =========================
    GLOBAL DEBUG CONFIG
 ========================= */
@@ -44,7 +45,6 @@ function onChangeInstallable(e) {
   } else {
     console.log("Gating FAILED");
   }
-
 }
 
 
@@ -56,14 +56,12 @@ function processEvaluationRow_(evalSheet, rowIndex) {
   console.log("=== PROCESS START ===");
 
   const lock = LockService.getScriptLock();
-  lock.waitLock(30000); // Prevent parallel execution
+  lock.waitLock(30000);
 
   try {
 
     const headerMap = getHeaderMap_(evalSheet);
 
-    // 🔹 Force recalculation BEFORE reading row
-    console.log("Forcing sheet recalculation...");
     SpreadsheetApp.flush();
     Utilities.sleep(250);
     SpreadsheetApp.flush();
@@ -74,24 +72,14 @@ function processEvaluationRow_(evalSheet, rowIndex) {
 
     const get = (col) => getCell_(row, headerMap, col);
 
-    console.log("Validation snapshot:",
-      "InputReady:", get("Input_Ready_For_Comparison"),
-      "Compare_ID:", get("Compare_ID"),
-      "Evaluation_ID:", get("Evaluation_ID")
-    );
-
-
-    // ====== GATING LOGIC ======
     if (get("Input_Ready_For_Comparison") !== true) return;
     if (Number(get("Compare_ID")) !== 1) return;
     if (!get("Evaluation_ID")) return;
 
-    // NEW: ensure full evaluation chain complete
     if (!get("Summary_UI") || get("Summary_UI").toString().trim() === "") {
       console.log("Exit: Summary_UI not ready");
       return;
     }
-    // ===========================
 
     const logSheet = SpreadsheetApp.getActive().getSheetByName("Item_Evaluation_Log");
     if (!logSheet) {
@@ -122,17 +110,31 @@ function processEvaluationRow_(evalSheet, rowIndex) {
 
       console.log("INSERTING new log row");
 
-      logSheet.appendRow(buildLogRow_(snapshot, logHeaderMap));
+      const newRowValues = buildLogRow_(snapshot, logHeaderMap);
+
+      const insertRowIndex = logSheet.getLastRow() + 1;
+
+      logSheet
+        .getRange(insertRowIndex, 1, 1, logSheet.getLastColumn())
+        .setValues([newRowValues]);
+
+      /* ===== FORMAT COPY FROM ROW 2 ANCHOR ===== */
+      if (logSheet.getLastRow() >= 2) {
+        logSheet
+        .getRange(2, 1, 1, logSheet.getLastColumn())
+        .copyTo(
+          logSheet.getRange(insertRowIndex, 1, 1, logSheet.getLastColumn()),
+          { formatOnly: true }
+    );
+}
+/* ========================================== */
+      
+    
     }
 
     if (!DEBUG_MODE) {
-      console.log("Resetting evaluator row (DEBUG_MODE = false)");
       resetEvaluatorRow_(evalSheet, rowIndex, headerMap);
-    } else {
-
-  console.log("DEBUG_MODE enabled → Skipping evaluator reset");
-
-}
+    }
 
     console.log("=== PROCESS END ===");
 
@@ -153,7 +155,6 @@ function buildSnapshot_(headerMap, row) {
     snapshot[key] = row[headerMap[key]];
   }
 
-  // Explicit field mapping
   snapshot["Evaluated_Item"] = snapshot["Planned_Item"];
   snapshot["Evaluated_Brand"] = snapshot["Planned_Brand"];
   snapshot["Evaluated_Product"] = snapshot["Planned_Product"];
@@ -213,7 +214,6 @@ function buildLogRow_(snapshot, logHeaderMap) {
     if (snapshotKey !== undefined) {
       row[logHeaderMap[logCol]] = snapshot[snapshotKey];
     }
-
   }
 
   return row;
@@ -252,7 +252,7 @@ function resetEvaluatorRow_(sheet, rowIndex, headerMap) {
 
 
 /* =========================
-   SAFE HEADER MAP (TRIM + CASE SAFE)
+   SAFE HEADER MAP
 ========================= */
 function getHeaderMap_(sheet) {
 

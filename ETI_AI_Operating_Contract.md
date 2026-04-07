@@ -74,7 +74,7 @@ When documenting tables or schemas:
 
 ## DERIVED COLUMN LOGIC (MANDATORY PRE-CONTEXT)
 
-- `Derived_Column_Logic` is a **first-class authoritative reference**
+- `ETI_App_v1.3_Derived_Column_Logic` is a **first-class authoritative reference**
 - AI MUST consult Derived_Column_Logic before:
   - Explaining any formula behavior
   - Suggesting formula changes or optimizations
@@ -91,7 +91,7 @@ Derived logic supersedes ad-hoc formula interpretation.
 
 ## APPSHEET CONTEXT & UI AUTHORITY
 
-- AppSheet exported documentation and column mappings are **authoritative UI context**
+- AppSheet exported documentation and attached in project are **authoritative UI context**
 - AI MUST consult them before:
   - Suggesting new views
   - Modifying UX behavior

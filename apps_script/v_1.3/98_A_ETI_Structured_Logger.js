@@ -20,12 +20,12 @@ function ETI_log_(payload) {
   }
 
   // ---- Persistent sheet logging (audit trail) ----
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const logSS = getLogsSpreadsheet_();
   const sheetName = 'Script_Logs';
 
-  let sh = ss.getSheetByName(sheetName);
+  let sh = logSS.getSheetByName(sheetName);
   if (!sh) {
-    sh = ss.insertSheet(sheetName);
+    sh = logSS.insertSheet(sheetName);
     sh.appendRow([
       'Timestamp',
       'Execution_ID',
@@ -49,5 +49,24 @@ function ETI_log_(payload) {
     payload.rowNumber || '',
     payload.action || '',
     payload.details || ''
+  ]);
+}
+
+function logToSheet_(message, level) {
+
+  const logSS = getLogsSpreadsheet_();
+  const shName = 'Script_Logs';
+
+  let sh = logSS.getSheetByName(shName);
+
+  if (!sh) {
+    sh = logSS.insertSheet(shName);
+    sh.appendRow(['Timestamp', 'Level', 'Message']);
+  }
+
+  sh.appendRow([
+    new Date(),
+    level || 'INFO',
+    message
   ]);
 }

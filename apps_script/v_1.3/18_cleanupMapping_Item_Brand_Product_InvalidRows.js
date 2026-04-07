@@ -6,33 +6,23 @@
  *
  * Purpose:
  * - Permanently DELETE invalid rows from Mapping_Item_Brand_Product
- * - A row is invalid if ANY of the following is missing:
- *   - Item_ID_Machine
- *   - Brand_ID_Machine
- *   - Product_ID_Machine
+ * - A row is invalid if:
+ *     Item_ID_Machine missing
+ *     OR Brand_ID_Machine missing
+ *     OR Product_ID_Machine missing
  *
  * Preconditions:
  * - Sheet must exist: Mapping_Item_Brand_Product
  * - Header row present in row 1
- * - Required columns (header-based):
- *   - Item_ID_Machine
- *   - Brand_ID_Machine
- *   - Product_ID_Machine
+ * - Required columns exist
  *
- * Algorithm (Step-by-Step):
- * 1. Generate Execution_ID for traceability.
- * 2. Read Mapping_Item_Brand_Product into memory.
- * 3. Resolve column indexes from header row.
- * 4. Identify rows where any of the three IDs is blank.
- * 5. Delete those rows (bottom-up to preserve row indexing).
- * 6. Emit execution summary and completion logs.
- *
- * Failure Modes:
- * - Mapping_Item_Brand_Product sheet not found
- * - Required columns missing
- *
- * Reason for Deprecation (if applicable):
- * - N/A
+ * Algorithm:
+ * 1. Generate Execution_ID
+ * 2. Read Mapping_Item_Brand_Product
+ * 3. Resolve column indexes
+ * 4. Identify rows missing identity columns
+ * 5. Delete rows bottom-up
+ * 6. Emit execution logs
  */
 
 function cleanupMapping_Item_Brand_Product_InvalidRows() {
@@ -42,6 +32,7 @@ function cleanupMapping_Item_Brand_Product_InvalidRows() {
   const MAP_SHEET    = 'Mapping_Item_Brand_Product';
 
   const t0 = new Date();
+
   console.log(`[${SCRIPT_NAME}] START`);
 
   ETI_log_({
@@ -53,30 +44,31 @@ function cleanupMapping_Item_Brand_Product_InvalidRows() {
     details: 'Execution started'
   });
 
-  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
   const mapSh = ss.getSheetByName(MAP_SHEET);
 
   if (!mapSh) {
-    throw new Error(`Sheet ${MAP_SHEET} not found`);
+    throw new Error(`Sheet not found: ${MAP_SHEET}`);
   }
 
-  const dataRange = mapSh.getDataRange();
-  const data      = dataRange.getValues();
+  const data = mapSh.getDataRange().getValues();
 
   if (data.length < 2) {
+
     ETI_log_({
       executionId: EXECUTION_ID,
       scriptName: SCRIPT_NAME,
       sheetName: MAP_SHEET,
       level: 'INFO',
       action: 'EXIT',
-      details: 'No data rows found'
+      details: 'No data rows present'
     });
+
     return;
   }
 
   const header = data[0];
-  const col = name => header.indexOf(name);
+  const col = n => header.indexOf(n);
 
   const IDX = {
     itemId: col('Item_ID_Machine'),
@@ -85,19 +77,22 @@ function cleanupMapping_Item_Brand_Product_InvalidRows() {
   };
 
   for (const [k, v] of Object.entries(IDX)) {
+
     if (v === -1) {
       throw new Error(`Missing required column: ${k}`);
     }
   }
 
-  /* ======================================================
+  /* =====================================
      IDENTIFY INVALID ROWS
-     ====================================================== */
+  ===================================== */
 
   const rowsToDelete = [];
 
   for (let i = 1; i < data.length; i++) {
+
     const rowNum = i + 1;
+
     const itemId    = data[i][IDX.itemId];
     const brandId   = data[i][IDX.brandId];
     const productId = data[i][IDX.productId];
@@ -107,12 +102,23 @@ function cleanupMapping_Item_Brand_Product_InvalidRows() {
     }
   }
 
-  /* ======================================================
+  /* =====================================
      DELETE ROWS (BOTTOM-UP)
-     ====================================================== */
+  ===================================== */
 
   for (let i = rowsToDelete.length - 1; i >= 0; i--) {
+
     mapSh.deleteRow(rowsToDelete[i]);
+
+    ETI_log_({
+      executionId: EXECUTION_ID,
+      scriptName: SCRIPT_NAME,
+      sheetName: MAP_SHEET,
+      level: 'WARN',
+      rowNumber: rowsToDelete[i],
+      action: 'DELETE_INVALID_ROW',
+      details: 'Missing Item_ID_Machine, Brand_ID_Machine, or Product_ID_Machine'
+    });
   }
 
   const durationMs = new Date().getTime() - t0.getTime();

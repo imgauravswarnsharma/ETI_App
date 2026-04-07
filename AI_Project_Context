@@ -1,56 +1,135 @@
-You are operating inside the ETI — Expense & Transaction Intelligence project.
+# ETI — Expense & Transaction Intelligence  
+## Project Context (Authoritative)
 
-The following uploaded artifacts are AUTHORITATIVE and must be treated as the single source of truth unless explicitly overridden:
+---
 
-1. AI Operating Contract
-   - File: ETI_AI_Operating_Contract.md
-   - Role: Defines binding rules for response style, documentation, scripting, versioning, and copy-paste requirements.
+You are operating inside the **ETI — Expense & Transaction Intelligence** project.
 
-2. Backend Data & Schema
-   - File: ETI_App_v1.3.xlsx (exported from Google Sheets)
-   - Role:
-     - Represents the current working backend
-     - Defines sheet names, column order, column semantics, and existing formulas
-     - Must be used as the reference for schema, column mapping, and formula generation
+The following artifacts are **AUTHORITATIVE** and must be treated as the **single source of truth**, each within its defined scope, unless explicitly overridden.
 
-3. (If present) Script Archive
-   - File(s): *.gs / *.js / script archive document
-   - Role:
-     - Represents Google Apps Script logic associated with the backend
-     - Used to understand automation, assumptions, and failure modes
-     - Scripts are not embedded in Excel and must be reasoned about separately
+---
 
-MANDATORY BEHAVIOR:
+## 1. AI Operating Contract
+- File: `ETI_AI_Operating_Contract.md`
+- Role:
+  - Defines binding rules for response style, documentation, scripting, versioning, and copy-paste requirements
+  - Governs reasoning precedence and intelligence surfaces
+  - Must be followed strictly in all responses
 
-- Follow the AI Operating Contract strictly.
-- Treat uploaded files as authoritative over chat history.
-- Do not infer schema, column order, or logic beyond what is visible in the uploaded files.
-- All Google Sheets / Excel formulas must be:
-  - Copy-paste ready
-  - Explicitly column-position based
-  - Clearly mapped column-to-column
-- When documenting:
-  - Output strictly in Markdown
-  - No prose outside headings, tables, or fenced blocks
-- When generating scripts:
-  - Include the mandatory structured script header
-  - Assume the user does not write Google Apps Script independently
-  - Make logic and logs explainable for human debugging
+---
 
-WORKING MODE:
+## 2. Raw Backend Data (Physical Truth)
+- File: `ETI_App_v1.3.xlsx`
+- Role:
+  - Represents the **raw, physical data state**
+  - Contains:
+    - transaction data
+    - master data
+    - stored column values
+  - Source of truth for:
+    - actual data values
+    - physical sheet structure as stored
+- Explicitly NOT the source of truth for:
+  - derived column logic
+  - semantic meaning of columns
+  - dependency interpretation
 
-- Use the Excel file to read:
-  - Sheet structure
-  - Column headers
-  - Column positions
-  - Existing formulas (if present)
-- Use the contract to enforce formatting, discipline, and version safety.
-- Surface decisions, assumptions, and changes explicitly in copy-paste-ready output so the user can sync human documentation.
+---
 
-DEFAULT ASSUMPTION:
+## 3. Derived Column Logic & Semantic Truth (Primary Reasoning Surface)
+- File: `ETI_App_v1.3 - Derived_Column_Logic.csv`
+- Role:
+  - **Authoritative source for all derived logic**
+  - Canonical reference for:
+    - column positions (logical)
+    - derivation rules
+    - dependency chains
+    - semantic classification
+  - Supersedes:
+    - Google Sheets formulas
+    - inferred logic from raw backend
+- Mandatory usage:
+  - Must be consulted before:
+    - explaining any column behavior
+    - writing or modifying formulas
+    - reasoning about dependencies
+    - performing optimizations
+- Hard rule:
+  - If a column or formula is not present or unclear in this CSV, **the AI must ask the user to confirm**
+  - No assumptions or inferred logic are allowed
 
-- We are continuing ETI v1.3 unless explicitly stated otherwise.
-- We are optimizing for correctness, performance, and auditability.
-- No architecture redesign unless explicitly requested.
+---
+
+## 4. AppSheet Logic & UI Context (Authoritative UI Truth)
+- File: `Appsheet_Documentation.pdf`
+- Role:
+  - Canonical source for:
+    - AppSheet formulas
+    - views
+    - slices
+    - actions
+    - column visibility and editability
+  - Whatever is documented is assumed to be:
+    - active
+    - deployed
+    - in use
+- Constraints:
+  - AI must not:
+    - invent UI logic
+    - assume undocumented behavior
+  - Any ambiguity must be clarified with the user first
+
+---
+
+## 5. Script Archive (Executable Automation Truth)
+- File(s): `*.gs`, `*.js` (partial set due to upload limits)
+- Role:
+  - Authoritative automation logic
+  - Defines:
+    - mutation paths
+    - execution guarantees
+    - failure modes
+- Constraints:
+  - Not all scripts may be visible
+  - AI must not assume missing script behavior
+  - If automation behavior is unclear, **ask the user**
+
+---
+
+## MANDATORY BEHAVIOR
+
+- Follow the AI Operating Contract strictly
+- Treat uploaded artifacts as authoritative within their defined scope
+- Do not infer schema, column order, or logic beyond visible artifacts
+- **Never create derived logic by assumption**
+- Always confirm column logic from:
+  - `ETI_App_v1.3 - Derived_Column_Logic.csv`
+  - or directly with the user
+
+All formulas provided must be:
+- Copy-paste ready
+- Explicitly column-position based
+- Mapped back to the derived logic source
+
+---
+
+## WORKING MODE
+
+- Use:
+  - Excel → raw data truth
+  - Derived_Column_Logic CSV → semantic & logic truth
+  - AppSheet documentation → UI truth
+  - Scripts → automation truth
+- Surface decisions, assumptions, and required confirmations explicitly
+
+---
+
+## DEFAULT ASSUMPTIONS
+
+- ETI v1.3 is active unless explicitly stated otherwise
+- Optimize for correctness, auditability, and safety
+- No architecture redesign unless explicitly requested
+
+---
 
 Acknowledge this context implicitly and proceed without restating it in future responses.

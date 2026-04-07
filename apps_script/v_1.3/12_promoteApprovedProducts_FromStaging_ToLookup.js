@@ -47,132 +47,259 @@
  *   or merge workflows are introduced.
  */
 
+/**
+ * Script Name: promoteApprovedProducts_FromStaging_ToLookup
+ * Script Language: Google Apps Script (JavaScript)
+ * Version Introduced: v1.3
+ * Current Version: v1.3.1
+ * Current Status: ACTIVE
+ *
+ * Purpose:
+ * - Promote staging products into Lookup_Products once governance conditions are satisfied
+ * - Maintain deterministic promotion authority
+ * - Preserve lineage via Staging_Product_ID_Machine
+ * - Provide full action-level logging for debugging
+ *
+ * Promotion Gate (ALL must be true):
+ *
+ *   Action_Review_Status = "Pending (Promotion)"
+ *   Is_Pipeline_ready    = TRUE
+ *   Is_Lookup_Promoted   = FALSE
+ *
+ * Promotion Results:
+ *
+ * Lookup_Products row inserted
+ * Staging row updated with:
+ *
+ *   Mapped_Product_ID_Machine
+ *   Is_Lookup_Promoted
+ *   Action_Review_Status
+ *   Entity_Owner
+ *   Promotion_Label
+ *   Promoted_At
+ *   Product_Status
+ *   Notes
+ */
+
 function promoteApprovedProducts_FromStaging_ToLookup() {
 
   const EXECUTION_ID = Utilities.getUuid();
   const SCRIPT_NAME  = 'promoteApprovedProducts_FromStaging_ToLookup';
-  const STG_SHEET    = 'Staging_Lookup_Products';
-  const LKP_SHEET    = 'Lookup_Products';
+
+  const STG_SHEET = 'Staging_Lookup_Products';
+  const LKP_SHEET = 'Lookup_Products';
 
   const t0 = new Date();
-  console.log(`[${SCRIPT_NAME}] START`);
 
-  ETI_log_({
-    executionId: EXECUTION_ID,
-    scriptName: SCRIPT_NAME,
-    sheetName: STG_SHEET,
-    level: 'INFO',
-    action: 'START',
-    details: 'Execution started'
-  });
+  try {
 
-  const ss    = SpreadsheetApp.getActiveSpreadsheet();
-  const stgSh = ss.getSheetByName(STG_SHEET);
-  const lkSh  = ss.getSheetByName(LKP_SHEET);
+    console.log(`[${SCRIPT_NAME}] START`);
 
-  if (!stgSh || !lkSh) {
-    throw new Error('Required sheet not found');
-  }
-
-  /* ===================== READ LOOKUP ===================== */
-
-  const lkData = lkSh.getDataRange().getValues();
-  const lkHdr  = lkData[0];
-  const lkCol  = n => lkHdr.indexOf(n);
-
-  const IDX_LK = {
-    productId: lkCol('Product_ID_Machine'),
-    productHuman: lkCol('Product_ID_Human'),
-    productName: lkCol('Product_Name'),
-    productCanon: lkCol('Product_Name_Canonical'),
-    isActive: lkCol('Is_Active'),
-    isArchived: lkCol('Is_Archived'),
-    isStgPromoted: lkCol('Is_Staging_Promoted'),
-    notes: lkCol('Notes')
-  };
-
-  for (const [k, v] of Object.entries(IDX_LK)) {
-    if (v === -1) {
-      throw new Error(`Lookup_Products missing column: ${k}`);
-    }
-  }
-
-  /* ===================== READ STAGING ===================== */
-
-  const stgData = stgSh.getDataRange().getValues();
-  const stgHdr  = stgData[0];
-  const stgCol  = n => stgHdr.indexOf(n);
-
-  const IDX_STG = {
-    entered: stgCol('Prodcut_Name_Entered'),
-    approved: stgCol('Prodcut_Name_Approved'),
-    canon: stgCol('Prodcut_Name_Canonical'),
-    isApproved: stgCol('Is_Approved'),
-    isPromoted: stgCol('Is_Lookup_Promoted'),
-    mappedId: stgCol('Mapped_Prodcut_ID_Machine'),
-    notes: stgCol('Notes')
-  };
-
-  for (const [k, v] of Object.entries(IDX_STG)) {
-    if (v === -1) {
-      throw new Error(`Staging_Lookup_Products missing column: ${k}`);
-    }
-  }
-
-  /* ===================== PROMOTION LOOP ===================== */
-
-  const lookupAppendRows = [];
-  const stagingUpdates  = [];
-
-  let scanned = 0;
-  let promoted = 0;
-  let skipped = 0;
-
-  for (let i = 1; i < stgData.length; i++) {
-    scanned++;
-    const rowNum = i + 1;
-    const r = stgData[i];
-
-    if (r[IDX_STG.isApproved] !== true) { skipped++; continue; }
-    if (r[IDX_STG.isPromoted] === true) { skipped++; continue; }
-
-    const finalName =
-      r[IDX_STG.approved] ||
-      r[IDX_STG.entered];
-
-    if (!finalName) { skipped++; continue; }
-
-    const canon = r[IDX_STG.canon] || '';
-
-    const productIdMachine = Utilities.getUuid(); // FULL UUID
-
-    const newLookupRow = new Array(lkHdr.length).fill('');
-    newLookupRow[IDX_LK.productId]        = productIdMachine;
-    newLookupRow[IDX_LK.productHuman]     = '';
-    newLookupRow[IDX_LK.productName]      = finalName;
-    newLookupRow[IDX_LK.productCanon]     = canon;
-    newLookupRow[IDX_LK.isActive]         = true;
-    newLookupRow[IDX_LK.isArchived]       = false;
-    newLookupRow[IDX_LK.isStgPromoted]    = true;
-    newLookupRow[IDX_LK.notes]            = 'Promoted from staging';
-
-    lookupAppendRows.push(newLookupRow);
-
-    const existingNote = r[IDX_STG.notes] || '';
-    const newNote =
-      (existingNote ? existingNote + ' | ' : '') +
-      `Promoted to Lookup_Products → Product_ID_Machine=${productIdMachine}`;
-
-    stagingUpdates.push({
-      row: rowNum,
-      mappedId: productIdMachine,
-      note: newNote
+    ETI_log_({
+      executionId: EXECUTION_ID,
+      scriptName: SCRIPT_NAME,
+      sheetName: STG_SHEET,
+      level: 'INFO',
+      action: 'START',
+      details: 'Promotion execution started'
     });
 
-    promoted++;
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const stgSh = ss.getSheetByName(STG_SHEET);
+    const lkSh  = ss.getSheetByName(LKP_SHEET);
+
+    if (!stgSh || !lkSh) {
+      throw new Error('Required sheet not found');
+    }
+
+    /* ===================== READ LOOKUP ===================== */
+
+    const lkData = lkSh.getDataRange().getValues();
+    const lkHdr  = lkData[0];
+    const lkCol  = n => lkHdr.indexOf(n);
+
+    const IDX_LK = {
+
+      productName: lkCol('Product_Name'),
+      productCanon: lkCol('Product_Name_Canonical'),
+
+      isApproved: lkCol('Is_Approved'),
+      isActive: lkCol('Is_Active'),
+      isArchived: lkCol('Is_Archived'),
+
+      productStatus: lkCol('Product_Status'),
+      isStgPromoted: lkCol('Is_Staging_Promoted'),
+
+      sourceType: lkCol('Source_Type'),
+      createdAt: lkCol('Created_At'),
+      notes: lkCol('Notes'),
+
+      productIdMachine: lkCol('Product_ID_Machine'),
+      stagingId: lkCol('Staging_Product_ID_Machine')
+    };
+
+    for (const [k,v] of Object.entries(IDX_LK)) {
+      if (v === -1) throw new Error(`Lookup_Products missing column: ${k}`);
+    }
+
+    /* ===================== READ STAGING ===================== */
+
+    const stgData = stgSh.getDataRange().getValues();
+    const stgHdr  = stgData[0];
+    const stgCol  = n => stgHdr.indexOf(n);
+
+    const IDX_STG = {
+
+      entered: stgCol('Product_Name_Entered'),
+      approved: stgCol('Product_Name_Approved'),
+      canon: stgCol('Product_Name_Canonical'),
+
+      reviewStatus: stgCol('Action_Review_Status'),
+      pipelineReady: stgCol('Is_Pipeline_ready'),
+      isPromoted: stgCol('Is_Lookup_Promoted'),
+
+      stagingId: stgCol('Staging_Product_ID_Machine'),
+      mappedId: stgCol('Mapped_Product_ID_Machine'),
+
+      notes: stgCol('Notes'),
+
+      isApproved: stgCol('Is_Approved'),
+      isActive: stgCol('Is_Active'),
+      isArchived: stgCol('Is_Archived'),
+
+      entityOwner: stgCol('Entity_Owner'),
+      promotionLabel: stgCol('Promotion_Label'),
+      promotedAt: stgCol('Promoted_At'),
+      productStatus: stgCol('Product_Status')
+    };
+
+    for (const [k,v] of Object.entries(IDX_STG)) {
+      if (v === -1) throw new Error(`Staging_Lookup_Products missing column: ${k}`);
+    }
+
+    /* ===================== PROMOTION LOOP ===================== */
+
+    const lookupAppendRows = [];
+    const stagingUpdates   = [];
+
+    let scanned = 0;
+    let promoted = 0;
+    let skipped = 0;
+
+    for (let i = 1; i < stgData.length; i++) {
+
+      scanned++;
+
+      const rowNum = i + 1;
+      const r = stgData[i];
+
+      if (r[IDX_STG.reviewStatus] !== 'Pending (Promotion)') { skipped++; continue; }
+      if (r[IDX_STG.pipelineReady] !== true) { skipped++; continue; }
+      if (r[IDX_STG.isPromoted] === true) { skipped++; continue; }
+
+      const finalName =
+        r[IDX_STG.approved] ||
+        r[IDX_STG.entered];
+
+      if (!finalName) { skipped++; continue; }
+
+      const canon = r[IDX_STG.canon] || '';
+      const stagingId = r[IDX_STG.stagingId];
+
+      const productIdMachine = Utilities.getUuid();
+
+      const newLookupRow = new Array(lkHdr.length).fill('');
+
+      newLookupRow[IDX_LK.productName] = finalName;
+      newLookupRow[IDX_LK.productCanon] = canon;
+
+      newLookupRow[IDX_LK.isApproved] = r[IDX_STG.isApproved];
+      newLookupRow[IDX_LK.isActive]   = r[IDX_STG.isActive];
+      newLookupRow[IDX_LK.isArchived] = r[IDX_STG.isArchived];
+
+      newLookupRow[IDX_LK.productStatus] = r[IDX_STG.productStatus];
+
+      newLookupRow[IDX_LK.isStgPromoted] = true;
+      newLookupRow[IDX_LK.sourceType] = 'STAGING_PROMOTION';
+      newLookupRow[IDX_LK.createdAt] = new Date();
+
+      newLookupRow[IDX_LK.productIdMachine] = productIdMachine;
+      newLookupRow[IDX_LK.stagingId] = stagingId;
+
+      newLookupRow[IDX_LK.notes] =
+        `Promoted from staging → Staging_ID=${stagingId}`;
+
+      lookupAppendRows.push(newLookupRow);
+
+      /* derive promoted Product_Status */
+
+      let promotedStatus = '';
+
+      if (r[IDX_STG.isApproved] && r[IDX_STG.isArchived])
+        promotedStatus = 'Promoted (Archived)';
+
+      else if (r[IDX_STG.isApproved] && r[IDX_STG.isActive])
+        promotedStatus = 'Promoted (Live)';
+
+      else if (r[IDX_STG.isApproved])
+        promotedStatus = 'Promoted (Hidden Dropdown)';
+
+      const existingNote = r[IDX_STG.notes] || '';
+
+      const newNote =
+        (existingNote ? existingNote + ' | ' : '') +
+        `Promoted to Lookup_Products → Product_ID_Machine=${productIdMachine}`;
+
+      stagingUpdates.push({
+        row: rowNum,
+        mappedId: productIdMachine,
+        note: newNote,
+        status: promotedStatus
+      });
+
+      ETI_log_({
+        executionId: EXECUTION_ID,
+        scriptName: SCRIPT_NAME,
+        sheetName: STG_SHEET,
+        level: 'INFO',
+        action: 'PROMOTION',
+        details:
+          `Row=${rowNum}, Staging_ID=${stagingId}, Product_ID=${productIdMachine}, Product_Name=${finalName}`
+      });
+
+      promoted++;
+    }
+
+    /* ===================== WRITE LOOKUP ===================== */
+
+    if (lookupAppendRows.length > 0) {
+
+      lkSh.getRange(
+        lkSh.getLastRow() + 1,
+        1,
+        lookupAppendRows.length,
+        lookupAppendRows[0].length
+      ).setValues(lookupAppendRows);
+    }
+
+    /* ===================== WRITE BACK STAGING ===================== */
+
+    for (const u of stagingUpdates) {
+
+      stgSh.getRange(u.row, IDX_STG.mappedId + 1).setValue(u.mappedId);
+      stgSh.getRange(u.row, IDX_STG.isPromoted + 1).setValue(true);
+      stgSh.getRange(u.row, IDX_STG.reviewStatus + 1).setValue('Promoted');
+      stgSh.getRange(u.row, IDX_STG.entityOwner + 1).setValue('Lookup');
+      stgSh.getRange(u.row, IDX_STG.promotionLabel + 1).setValue('Promoted');
+      stgSh.getRange(u.row, IDX_STG.promotedAt + 1).setValue(new Date());
+      stgSh.getRange(u.row, IDX_STG.productStatus + 1).setValue(u.status);
+      stgSh.getRange(u.row, IDX_STG.notes + 1).setValue(u.note);
+    }
+
+    const durationMs = new Date().getTime() - t0.getTime();
 
     console.log(
-      `[${SCRIPT_NAME}] PROMOTED row ${rowNum} → Product_ID_Machine=${productIdMachine}`
+      `[${SCRIPT_NAME}] Scanned=${scanned}, Promoted=${promoted}, Skipped=${skipped}, DurationMs=${durationMs}`
     );
 
     ETI_log_({
@@ -180,52 +307,30 @@ function promoteApprovedProducts_FromStaging_ToLookup() {
       scriptName: SCRIPT_NAME,
       sheetName: STG_SHEET,
       level: 'INFO',
-      rowNumber: rowNum,
-      action: 'PROMOTE_PRODUCT',
-      details: `Promoted staging product → Product_ID_Machine=${productIdMachine}`
+      action: 'SUMMARY',
+      details: `Scanned=${scanned}, Promoted=${promoted}, Skipped=${skipped}, DurationMs=${durationMs}`
     });
+
+    ETI_log_({
+      executionId: EXECUTION_ID,
+      scriptName: SCRIPT_NAME,
+      sheetName: STG_SHEET,
+      level: 'INFO',
+      action: 'END',
+      details: 'Promotion execution completed'
+    });
+
+  } catch (err) {
+
+    ETI_log_({
+      executionId: EXECUTION_ID,
+      scriptName: SCRIPT_NAME,
+      sheetName: STG_SHEET,
+      level: 'ERROR',
+      action: 'FAILED',
+      details: err.message
+    });
+
+    throw err;
   }
-
-  /* ===================== WRITE LOOKUP ===================== */
-
-  if (lookupAppendRows.length > 0) {
-    lkSh.getRange(
-      lkSh.getLastRow() + 1,
-      1,
-      lookupAppendRows.length,
-      lookupAppendRows[0].length
-    ).setValues(lookupAppendRows);
-  }
-
-  /* ===================== WRITE BACK TO STAGING ===================== */
-
-  for (const u of stagingUpdates) {
-    stgSh.getRange(u.row, IDX_STG.mappedId + 1).setValue(u.mappedId);
-    stgSh.getRange(u.row, IDX_STG.isPromoted + 1).setValue(true);
-    stgSh.getRange(u.row, IDX_STG.notes + 1).setValue(u.note);
-  }
-
-  const durationMs = new Date().getTime() - t0.getTime();
-
-  console.log(
-    `[${SCRIPT_NAME}] Scanned=${scanned}, Promoted=${promoted}, Skipped=${skipped}, DurationMs=${durationMs}`
-  );
-
-  ETI_log_({
-    executionId: EXECUTION_ID,
-    scriptName: SCRIPT_NAME,
-    sheetName: STG_SHEET,
-    level: 'INFO',
-    action: 'SUMMARY',
-    details: `Scanned=${scanned}, Promoted=${promoted}, Skipped=${skipped}, DurationMs=${durationMs}`
-  });
-
-  ETI_log_({
-    executionId: EXECUTION_ID,
-    scriptName: SCRIPT_NAME,
-    sheetName: STG_SHEET,
-    level: 'INFO',
-    action: 'END',
-    details: 'Execution completed successfully'
-  });
 }
