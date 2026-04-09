@@ -421,7 +421,7 @@ function buildLogComponents_(payload){
 
 /*
 -------------------------------------
-CORE LOGGER
+CORE LOGGER (ETI LOG)
 -------------------------------------
 */
 function ETI_log_(payload) {
@@ -462,6 +462,7 @@ function ETI_log_(payload) {
   ACTION LOG (BUFFERED)
   -------------------------------------
   */
+
   if (!isActionLogEnabled_()) return;
 
   ETI_LOG_BUFFER.push([
@@ -507,49 +508,98 @@ function flushLogs_(){
 
   let sh = logSS.getSheetByName(sheetName);
 
-  // Ensure schema
+  // Ensure sheet + base schema
   if (!sh) {
     sh = logSS.insertSheet(sheetName);
     sh.appendRow(ACTION_LOG_SCHEMA);
-  } else {
-    const existingHeader = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0];
-
-    const isMismatch =
-      existingHeader.length !== ACTION_LOG_SCHEMA.length ||
-      existingHeader.some((h,i) => h !== ACTION_LOG_SCHEMA[i]);
-
-    if (isMismatch) {
-      sh.clear();
-      sh.appendRow(ACTION_LOG_SCHEMA);
-
-      ETI_debugLogInternal_('Logger', 'SchemaReset', 'WARN',
-        'Action_Logs schema mismatch detected and reset');
-    }
   }
 
-/*
--------------------------------------
-BLANK ROW INJECTION (FIXED)
--------------------------------------
-*/
-let startRow = sh.getLastRow() + 1;
+  /*
+ -------------------------------
+ POSITION-AGNOSTIC HEADER SYSTEM
+ -------------------------------
+  */
+  const existingHeader = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0];
 
-if (sh.getLastRow() > 1) {
-  sh.insertRowBefore(startRow);
+  const headerMap = {};
+  existingHeader.forEach((col, idx) => {
+    headerMap[col] = idx + 1;
+  });
 
-  // APPLY COLOR TO BLANK ROW
-  sh.getRange(startRow, 1, 1, ACTION_LOG_SCHEMA.length)
-    .setBackground('#fbbc04');
+  // Identify missing columns
+  const missingColumns = ACTION_LOG_SCHEMA.filter(col => !headerMap[col]);
 
-  startRow++; // CRITICAL FIX
-}
+  // Append missing columns
+  if (missingColumns.length > 0) {
+    sh.getRange(1, existingHeader.length + 1, 1, missingColumns.length)
+      .setValues([missingColumns]);
 
-sh.getRange(startRow, 1, ETI_LOG_BUFFER.length, ACTION_LOG_SCHEMA.length)
-  .setValues(ETI_LOG_BUFFER);
-  
+    missingColumns.forEach((col, i) => {
+      headerMap[col] = existingHeader.length + i + 1;
+    });
+  }
+
+
+  /*
+  -------------------------------------
+  EXECUTION-BOUNDARY SEPARATOR (FIXED)
+  -------------------------------------
+  */
+  const ctx = getExecutionContext_();
+  const executionId = ctx?.execution_id;
+
+  if (!globalThis.__ETI_LAST_FLUSH_EXECUTION_ID__) {
+    globalThis.__ETI_LAST_FLUSH_EXECUTION_ID__ = null;
+  }
+
+  let startRow = sh.getLastRow() + 1;
+
+  if (executionId && globalThis.__ETI_LAST_FLUSH_EXECUTION_ID__ !== executionId) {
+
+    if (sh.getLastRow() > 1) {
+      sh.insertRowBefore(startRow);
+
+      sh.getRange(startRow, 1, 1, sh.getLastColumn())
+        .setBackground('#fbbc04');
+
+      startRow++;
+    }
+
+    globalThis.__ETI_LAST_FLUSH_EXECUTION_ID__ = executionId;
+  }
+
+
+  /*
+  -------------------------------------
+  POSITION-AWARE WRITE
+  -------------------------------------
+  */
+  const totalColumns = sh.getLastColumn();
+
+  const rows = ETI_LOG_BUFFER.map(row => {
+    const obj = {};
+
+    ACTION_LOG_SCHEMA.forEach((col, i) => {
+      obj[col] = row[i];
+    });
+
+    const outputRow = new Array(totalColumns).fill('');
+
+    Object.keys(obj).forEach(col => {
+      const colIndex = headerMap[col];
+      if (colIndex) {
+        outputRow[colIndex - 1] = obj[col];
+      }
+    });
+
+    return outputRow;
+  });
+
+  sh.getRange(startRow, 1, rows.length, totalColumns)
+    .setValues(rows);
+
   // Clear buffer
   ETI_LOG_BUFFER = [];
-
 }
 
 
@@ -569,21 +619,20 @@ function ETI_debugLogInternal_(script, fn, level, msg){
 }
 
 
+
 /*
 -------------------------------------
-UTILITY: ERROR LOGGER
+UTILITY: START LOGGER
 -------------------------------------
 */
-function ETI_logError_(scriptName, functionName, error, stepName=''){
-
+function ETI_logStart_(scriptName, functionName, sheetName){
   ETI_log_({
     scriptName,
     functionName,
-    level: 'ERROR',
-    action: 'ERROR',
-    stepName,
-    details: error?.message || '',
-    errorMessage: error?.stack || ''
+    sheetName,
+    level: 'INFO',
+    action: 'START',
+    details: 'Execution started'
   });
 }
 
@@ -593,24 +642,96 @@ function ETI_logError_(scriptName, functionName, error, stepName=''){
 UTILITY: STEP LOGGER
 -------------------------------------
 */
-function ETI_logStepStart_(scriptName, functionName, stepName){
+function ETI_logStepStart_(scriptName, functionName, sheetName, stepName=''){
   ETI_log_({
     scriptName,
     functionName,
+    sheetName,
     level: 'INFO',
     action: 'PROCESS',
     stepName,
-    details: `${formatStep_(stepName)} started`
+    details: stepName ? `${formatStep_(stepName)} started` : 'Step started'
   });
 }
 
-function ETI_logStepEnd_(scriptName, functionName, stepName, summary=''){
+function ETI_logStepEnd_(scriptName, functionName, sheetName, stepName='', details=''){
   ETI_log_({
     scriptName,
     functionName,
+    sheetName,
     level: 'INFO',
     action: 'PROCESS',
     stepName,
-    details: summary || `${formatStep_(stepName)} completed`
+    details: details || (stepName ? `${formatStep_(stepName)} completed` : 'Step completed')
+  });
+}
+
+
+/*
+-------------------------------------
+UTILITY: SUMMARY LOGGER
+-------------------------------------
+*/
+function ETI_logSummary_(scriptName, functionName, sheetName, details){
+  ETI_log_({
+    scriptName,
+    functionName,
+    sheetName,
+    level: 'INFO',
+    action: 'SUMMARY',
+    details
+  });
+}
+
+
+/*
+-------------------------------------
+UTILITY: EXIT LOGGER
+-------------------------------------
+*/
+function ETI_logExit_(scriptName, functionName, sheetName, details){
+  ETI_log_({
+    scriptName,
+    functionName,
+    sheetName,
+    level: 'WARN',
+    action: 'EXIT',
+    details
+  });
+}
+
+
+/*
+-------------------------------------
+UTILITY: END LOGGER
+-------------------------------------
+*/
+function ETI_logEnd_(scriptName, functionName, sheetName){
+  ETI_log_({
+    scriptName,
+    functionName,
+    sheetName,
+    level: 'INFO',
+    action: 'END',
+    details: 'Execution completed'
+  });
+}
+
+
+/*
+-------------------------------------
+UTILITY: ERROR LOGGER
+-------------------------------------
+*/
+function ETI_logError_(scriptName, functionName, sheetName, error, stepName=''){
+  ETI_log_({
+    scriptName,
+    functionName,
+    sheetName,
+    level: 'ERROR',
+    action: 'ERROR',
+    stepName,
+    details: error?.message || '',
+    errorMessage: error?.stack || ''
   });
 }
