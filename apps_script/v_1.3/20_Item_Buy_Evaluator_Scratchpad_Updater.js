@@ -2,7 +2,7 @@
 /* =========================
    GLOBAL DEBUG CONFIG
 ========================= */
-const DEBUG_MODE = isDebugModeEnabled_();
+const EVALUATOR_PERSIST_MODE = true // IF TRUE THEN EVALUATOR WILL NOT OUTPUTS CLEAR POST EXECUTION. HELPFUL FOR DEBUG.
 
 /* =========================
    ENTRY TRIGGER
@@ -129,7 +129,7 @@ function processEvaluationRow_(evalSheet, rowIndex) {
     
     }
 
-    if (!DEBUG_MODE) {
+    if (!EVALUATOR_PERSIST_MODE) {
       resetEvaluatorRow_(evalSheet, rowIndex, headerMap);
     }
 
