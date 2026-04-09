@@ -1,9 +1,303 @@
 /**
- * Logger Name: ETI_Structured_Logger
- * Version: v1.3
- * Status: Buffered Write + Debug Mirror
+ * =========================================================
+ * SYSTEM CONTEXT: ETI STRUCTURED LOGGER
+ * =========================================================
+ *
+ * POSITION IN ARCHITECTURE:
+ * ---------------------------------------------------------
+ * Logger = Core Infrastructure Layer
+ *
+ * Used by:
+ * - Controller (entry point)
+ * - Pipelines (execution grouping)
+ * - All scripts (business logic)
+ *
+ * It is the SINGLE SOURCE OF TRUTH for:
+ * - Debug logging
+ * - Action logging (persistent audit)
+ * - Execution context propagation
+ *
+ *
+ * =========================================================
+ * 1. CORE COMPONENTS
+ * =========================================================
+ *
+ * 1. EXECUTION CONTEXT (GLOBAL STATE)
+ * ---------------------------------------------------------
+ * Defined via:
+ *   initExecutionContext_()
+ *   getExecutionContext_()
+ *
+ * Structure:
+ * {
+ *   execution_id   → unique UUID per run
+ *   pipeline_name  → set at pipeline level
+ *   run_context    → STANDALONE / PIPELINE
+ *   trigger_type   → MANUAL / CONTROLLER
+ *   started_at     → timestamp
+ * }
+ *
+ * Behavior:
+ * - Initialized ONLY at execution entry points
+ *   (Controller OR manual pipeline/script)
+ *
+ * - Pipeline layer may MODIFY context (not recreate)
+ *
+ * - Logger READS context (never mutates it)
+ *
+ *
+ * =========================================================
+ * 2. LOGGING FLOW (END-TO-END)
+ * =========================================================
+ *
+ * ENTRY POINTS:
+ * ---------------------------------------------------------
+ * A. Controller Execution
+ *    → initExecutionContext_({ trigger_type: CONTROLLER })
+ *
+ * B. Manual Execution (Apps Script UI)
+ *    → initExecutionContext_() OR implicit defaults
+ *
+ * C. Pipeline Execution
+ *    → Enhances context:
+ *       pipeline_name
+ *       run_context = PIPELINE
+ *
+ *
+ * LOGGING EXECUTION:
+ * ---------------------------------------------------------
+ * Step 1: Script calls ETI_log_(payload)
+ *
+ * Step 2: Logger builds:
+ *   - Debug line (console)
+ *   - Structured row (buffer)
+ *
+ * Step 3: Buffer accumulates logs
+ *
+ * Step 4: flushLogs_() writes to sheet (batch)
+ *
+ *
+ * =========================================================
+ * 3. LOG TYPES
+ * =========================================================
+ *
+ * A. DEBUG LOG (REAL-TIME)
+ * ---------------------------------------------------------
+ * Output:
+ *   Apps Script console
+ *
+ * Format:
+ *   [Script - Function - Sheet] ACTION ⇒ Details
+ *
+ * Example:
+ *   [Items - populate... - Staging_Lookup_Items] SUMMARY ⇒ Scanned=1999 | ...
+ *
+ * Purpose:
+ * - Fast visual debugging
+ * - Execution trace
+ *
+ *
+ * B. ACTION LOG (PERSISTENT)
+ * ---------------------------------------------------------
+ * Output:
+ *   Action_Logs sheet
+ *
+ * Stored as structured rows
+ *
+ * Includes:
+ * - Execution metadata
+ * - Debug message snapshot
+ * - Error details
+ *
+ *
+ * =========================================================
+ * 4. ACTION LOG SCHEMA
+ * =========================================================
+ *
+ * Columns:
+ *
+ * Timestamp
+ * Level
+ *
+ * Trigger_Type
+ * Run_Context
+ *
+ * Action
+ * Debug_Message
+ * Error_Message
+ *
+ * Execution_ID
+ *
+ * Pipeline_Name
+ * Script_Name
+ * Function_Name
+ * Sheet_Name
+ * Switch_Name
+ *
+ * Step_Name
+ * Row_Number
+ *
+ * Details
+ *
+ *
+ * Design Intent:
+ * ---------------------------------------------------------
+ * - Debug_Message = primary scan column
+ * - Other columns = structured filtering / audit
+ *
+ *
+ * =========================================================
+ * 5. LOG FORMATTING SYSTEM
+ * =========================================================
+ *
+ * Centralized via:
+ *   buildLogComponents_()
+ *
+ * Sub-components:
+ *
+ * 1. formatAction_
+ *    → Converts ACTION_NAME → "ACTION NAME"
+ *
+ * 2. formatStep_
+ *    → Converts STEP_NAME → "STEP NAME"
+ *
+ * 3. sanitizeLogText_
+ *    → Removes:
+ *       - new lines
+ *       - extra spaces
+ *       - unsafe characters
+ *
+ * 4. Header Builder:
+ *    → [Script - Function - Sheet]
+ *
+ *
+ * RULE:
+ * ---------------------------------------------------------
+ * Logger controls:
+ *   ✔ Structure
+ *   ✔ Safety
+ *
+ * Script controls:
+ *   ✔ Meaning
+ *   ✔ Metrics
+ *
+ *
+ * =========================================================
+ * 6. BUFFERED WRITE SYSTEM
+ * =========================================================
+ *
+ * Mechanism:
+ * ---------------------------------------------------------
+ * - Logs are NOT written immediately
+ * - Stored in ETI_LOG_BUFFER
+ * - Written in batch via flushLogs_()
+ *
+ * Benefits:
+ * ---------------------------------------------------------
+ * ✔ Performance optimized
+ * ✔ Reduces API calls
+ * ✔ Prevents partial writes
+ *
+ *
+ * CRITICAL RULE:
+ * ---------------------------------------------------------
+ * flushLogs_() MUST be called:
+ * - At pipeline end
+ * - At controller wrapper end
+ * - In finally blocks
+ *
+ *
+ * =========================================================
+ * 7. EXECUTION CONTEXT PROPAGATION
+ * =========================================================
+ *
+ * FLOW:
+ *
+ * Controller
+ *   ↓
+ * initExecutionContext_
+ *   ↓
+ * Pipeline (enhances context)
+ *   ↓
+ * Script functions (read-only)
+ *   ↓
+ * Logger uses context
+ *
+ *
+ * RULES:
+ * ---------------------------------------------------------
+ * ✔ Only ENTRY POINT initializes context
+ * ✔ Lower layers MUST NOT reinitialize
+ * ✔ Context can only be ENRICHED downstream
+ *
+ *
+ * =========================================================
+ * 8. ERROR HANDLING
+ * =========================================================
+ *
+ * Utility:
+ *   ETI_logError_()
+ *
+ * Captures:
+ * - error.message → Details
+ * - error.stack   → Error_Message
+ *
+ *
+ * =========================================================
+ * 9. STEP LOGGING (STANDARDIZED)
+ * =========================================================
+ *
+ * Utilities:
+ * - ETI_logStepStart_
+ * - ETI_logStepEnd_
+ *
+ * Output:
+ *   PROCESS ⇒ LOAD STAGING started
+ *   PROCESS ⇒ LOAD STAGING completed
+ *
+ *
+ * =========================================================
+ * 10. DESIGN PRINCIPLES
+ * =========================================================
+ *
+ * ✔ Single Source of Truth (Logger only)
+ * ✔ No logging logic in business scripts
+ * ✔ Context-driven logging
+ * ✔ Plug-and-play across system
+ * ✔ Performance-first (batch writes)
+ * ✔ Readable debug-first design
+ *
+ *
+ * =========================================================
+ * 11. CONTROLLER + PIPELINE + LOGGER INTERPLAY
+ * =========================================================
+ *
+ * Controller:
+ *   → Defines trigger_type
+ *   → Starts execution
+ *
+ * Pipeline:
+ *   → Defines run_context
+ *   → Defines pipeline_name
+ *
+ * Script:
+ *   → Emits logs (no context logic)
+ *
+ * Logger:
+ *   → Formats + persists logs
+ *
+ *
+ * =========================================================
+ * 12. FINAL ARCHITECTURE SUMMARY
+ * =========================================================
+ *
+ * Controller  → WHEN to run
+ * Pipeline    → WHAT group to run
+ * Script      → HOW logic runs
+ * Logger      → WHAT happened (audit + debug)
+ *
+ * =========================================================
  */
-
 
 /*
 -------------------------------------
@@ -137,6 +431,20 @@ function ETI_log_(payload) {
     payload.functionName = payload.scriptName;
   }
 
+  /*
+  -------------------------------------
+  EXECUTION CONTEXT FALLBACK (ADDED)
+  -------------------------------------
+  */
+  let ctx = getExecutionContext_();
+  if (!ctx) {
+    initExecutionContext_({
+      run_context: 'STANDALONE',
+      trigger_type: 'MANUAL'
+    });
+    ctx = getExecutionContext_();
+  }
+
   const { logLine, cleanDetails, cleanError } = buildLogComponents_(payload);
 
   /*
@@ -155,8 +463,6 @@ function ETI_log_(payload) {
   -------------------------------------
   */
   if (!isActionLogEnabled_()) return;
-
-  const ctx = getExecutionContext_();
 
   ETI_LOG_BUFFER.push([
     new Date(),
@@ -221,13 +527,29 @@ function flushLogs_(){
     }
   }
 
-  // Bulk write
-  const startRow = sh.getLastRow() + 1;
-  sh.getRange(startRow, 1, ETI_LOG_BUFFER.length, ACTION_LOG_SCHEMA.length)
-    .setValues(ETI_LOG_BUFFER);
+/*
+-------------------------------------
+BLANK ROW INJECTION (FIXED)
+-------------------------------------
+*/
+let startRow = sh.getLastRow() + 1;
 
+if (sh.getLastRow() > 1) {
+  sh.insertRowBefore(startRow);
+
+  // APPLY COLOR TO BLANK ROW
+  sh.getRange(startRow, 1, 1, ACTION_LOG_SCHEMA.length)
+    .setBackground('#fbbc04');
+
+  startRow++; // CRITICAL FIX
+}
+
+sh.getRange(startRow, 1, ETI_LOG_BUFFER.length, ACTION_LOG_SCHEMA.length)
+  .setValues(ETI_LOG_BUFFER);
+  
   // Clear buffer
   ETI_LOG_BUFFER = [];
+
 }
 
 
