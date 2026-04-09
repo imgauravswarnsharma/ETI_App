@@ -104,200 +104,246 @@
 
 function populateStagingLookupItems_FromTransactionResolution() {
 
-  const EXECUTION_ID = Utilities.getUuid();
-  const SCRIPT_NAME = 'populateStagingLookupItems_FromTransactionResolution';
+  const SCRIPT_NAME = 'Items';
+  const FUNCTION_NAME = 'populateStagingLookupItems_FromTransactionResolution';
   const TXN_SHEET = 'Transaction_Resolution';
   const STG_SHEET = 'Staging_Lookup_Items';
 
   const t0 = new Date();
 
-  console.log(`[${SCRIPT_NAME}] START`);
+  try {
 
-  ETI_log_({
-    executionId: EXECUTION_ID,
-    scriptName: SCRIPT_NAME,
-    sheetName: STG_SHEET,
-    level: 'INFO',
-    action: 'START',
-    details: 'Execution started'
-  });
+    /* =========================
+       START
+    ========================= */
+    ETI_log_({
+      scriptName: SCRIPT_NAME,
+      functionName: FUNCTION_NAME,
+      sheetName: STG_SHEET,
+      level: 'INFO',
+      action: 'START',
+      details: 'Execution started'
+    })
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const tsSh = ss.getSheetByName(TXN_SHEET);
-  const stgSh = ss.getSheetByName(STG_SHEET);
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const tsSh = ss.getSheetByName(TXN_SHEET);
+    const stgSh = ss.getSheetByName(STG_SHEET);
 
-  if (!tsSh || !stgSh) {
-    throw new Error('Required sheet not found');
-  }
-
-  /* ---------- Read staging header ---------- */
-
-  const stgData = stgSh.getDataRange().getValues();
-  const stgHdr = stgData[0];
-  const stgCol = n => stgHdr.indexOf(n);
-
-  const IDX_STG = {
-    sourceTxn: stgCol('Source_Txn_ID_Machine'),
-    stagingId: stgCol('Staging_Item_ID_Machine'),
-    mappedId: stgCol('Mapped_Item_ID_Machine'),
-    entered: stgCol('Item_Name_Entered'),
-    canon: stgCol('Item_Name_Canonical'),
-    approvedName: stgCol('Item_Name_Approved'),
-    adminAction: stgCol('Admin_Action'),
-    isApproved: stgCol('Is_Approved'),
-    isActive: stgCol('Is_Active'),
-    isArchived: stgCol('Is_Archived'),
-    isPromoted: stgCol('Is_Lookup_Promoted'),
-    populatedAt: stgCol('Populated_At'),
-    notes: stgCol('Notes')
-  };
-
-  for (const [k,v] of Object.entries(IDX_STG)) {
-    if (v === -1) throw new Error(`Staging_Lookup_Items missing column: ${k}`);
-  }
-
-  /* ---------- Existing staging canonicals ---------- */
-
-  const stagingCanonSet = new Set();
-
-  for (let i = 1; i < stgData.length; i++) {
-    const v = stgData[i][IDX_STG.canon];
-    if (v) stagingCanonSet.add(String(v));
-  }
-
-  /* ---------- Read Transaction Resolution ---------- */
-
-  const tsData = tsSh.getDataRange().getValues();
-  const tsHdr = tsData[0];
-  const tsCol = n => tsHdr.indexOf(n);
-
-  const IDX = {
-    txnId: tsCol('Txn_ID_Machine'),
-    itemId: tsCol('Item_ID_Machine'),
-    itemEntered: tsCol('Item_Name_Entered'),
-    itemCanon: tsCol('Item_Name_Canonical')
-  };
-
-  for (const [k,v] of Object.entries(IDX)) {
-    if (v === -1) {
-      throw new Error(`Transaction_Resolution missing column: ${k}`);
-    }
-  }
-
-  /* ---------- Counters ---------- */
-
-  let scanned = 0;
-  let skipNoTxn = 0;
-  let skipHasItem = 0;
-  let skipNoCanon = 0;
-  let skipDuplicateCanon = 0;
-
-  const rowsToAppend = [];
-
-  /* ---------- Processing Loop ---------- */
-
-  for (let i = 1; i < tsData.length; i++) {
-
-    scanned++;
-    const r = tsData[i];
-
-    if (!r[IDX.txnId]) {
-      skipNoTxn++;
-      continue;
+    if (!tsSh || !stgSh) {
+      throw new Error('Required sheet not found');
     }
 
-    if (r[IDX.itemId]) {
-      skipHasItem++;
-      continue;
+    /* =========================
+       STEP — LOAD_STAGING
+    ========================= */
+
+    ETI_logStepStart_(SCRIPT_NAME, FUNCTION_NAME, 'LOAD_STAGING');
+
+    const stgData = stgSh.getDataRange().getValues();
+    const stgHdr = stgData[0];
+    const stgCol = n => stgHdr.indexOf(n);
+
+    const IDX_STG = {
+      sourceTxn: stgCol('Source_Txn_ID_Machine'),
+      stagingId: stgCol('Staging_Item_ID_Machine'),
+      mappedId: stgCol('Mapped_Item_ID_Machine'),
+      entered: stgCol('Item_Name_Entered'),
+      canon: stgCol('Item_Name_Canonical'),
+      approvedName: stgCol('Item_Name_Approved'),
+      adminAction: stgCol('Admin_Action'),
+      isApproved: stgCol('Is_Approved'),
+      isActive: stgCol('Is_Active'),
+      isArchived: stgCol('Is_Archived'),
+      isPromoted: stgCol('Is_Lookup_Promoted'),
+      populatedAt: stgCol('Populated_At'),
+      notes: stgCol('Notes')
+    };
+
+    for (const [k,v] of Object.entries(IDX_STG)) {
+      if (v === -1) throw new Error(`Staging_Lookup_Items missing column: ${k}`);
     }
 
-    const canon = r[IDX.itemCanon];
+    const stagingCanonSet = new Set();
 
-    if (!canon) {
-      skipNoCanon++;
-      continue;
+    for (let i = 1; i < stgData.length; i++) {
+      const v = stgData[i][IDX_STG.canon];
+      if (v) stagingCanonSet.add(String(v));
     }
 
-    if (stagingCanonSet.has(canon)) {
-      skipDuplicateCanon++;
-      continue;
+    ETI_logStepEnd_(SCRIPT_NAME, FUNCTION_NAME, 'LOAD_STAGING');
+
+    /* =========================
+       STEP — LOAD_TXN
+    ========================= */
+
+    ETI_logStepStart_(SCRIPT_NAME, FUNCTION_NAME, 'LOAD_TXN');
+
+    const tsData = tsSh.getDataRange().getValues();
+    const tsHdr = tsData[0];
+    const tsCol = n => tsHdr.indexOf(n);
+
+    const IDX = {
+      txnId: tsCol('Txn_ID_Machine'),
+      itemId: tsCol('Item_ID_Machine'),
+      itemEntered: tsCol('Item_Name_Entered'),
+      itemCanon: tsCol('Item_Name_Canonical')
+    };
+
+    for (const [k,v] of Object.entries(IDX)) {
+      if (v === -1) {
+        throw new Error(`Transaction_Resolution missing column: ${k}`);
+      }
     }
 
-    const row = new Array(stgHdr.length).fill('');
+    ETI_logStepEnd_(SCRIPT_NAME, FUNCTION_NAME, 'LOAD_TXN');
 
-    row[IDX_STG.sourceTxn] = r[IDX.txnId];
-    row[IDX_STG.stagingId] = Utilities.getUuid();
-    row[IDX_STG.mappedId] = '';
-    row[IDX_STG.entered] = r[IDX.itemEntered];
-    row[IDX_STG.canon] = canon;
-    row[IDX_STG.approvedName] = '';
+    /* =========================
+       EXIT — NO DATA
+    ========================= */
 
-    row[IDX_STG.adminAction] = 'Review';
-    row[IDX_STG.isApproved] = false;
-    row[IDX_STG.isActive] = false;
-    row[IDX_STG.isArchived] = false;
-    row[IDX_STG.isPromoted] = false;
+    if (tsData.length <= 1) {
 
-    row[IDX_STG.populatedAt] = new Date();
+      ETI_log_({
+        scriptName: SCRIPT_NAME,
+        functionName: FUNCTION_NAME,
+        sheetName: STG_SHEET,
+        level: 'WARN',
+        action: 'EXIT',
+        details: 'No data rows in Transaction_Resolution'
+      });
 
-    row[IDX_STG.notes] = 'Staged from Transaction_Resolution';
+      return;
+    }
 
-    rowsToAppend.push(row);
+    /* =========================
+       PROCESS LOOP
+    ========================= */
 
-    stagingCanonSet.add(canon);
+    let scanned = 0;
+    let skipNoTxn = 0;
+    let skipHasItem = 0;
+    let skipNoCanon = 0;
+    let skipDuplicateCanon = 0;
+
+    const rowsToAppend = [];
+
+    for (let i = 1; i < tsData.length; i++) {
+
+      scanned++;
+
+      const r = tsData[i];
+
+      if (!r[IDX.txnId]) {
+        skipNoTxn++;
+        continue;
+      }
+
+      if (r[IDX.itemId]) {
+        skipHasItem++;
+        continue;
+      }
+
+      const canon = r[IDX.itemCanon];
+
+      if (!canon) {
+        skipNoCanon++;
+        continue;
+      }
+
+      if (stagingCanonSet.has(canon)) {
+        skipDuplicateCanon++;
+        continue;
+      }
+
+      const row = new Array(stgHdr.length).fill('');
+
+      row[IDX_STG.sourceTxn] = r[IDX.txnId];
+      row[IDX_STG.stagingId] = Utilities.getUuid();
+      row[IDX_STG.mappedId] = '';
+      row[IDX_STG.entered] = r[IDX.itemEntered];
+      row[IDX_STG.canon] = canon;
+      row[IDX_STG.approvedName] = '';
+
+      row[IDX_STG.adminAction] = 'Review';
+      row[IDX_STG.isApproved] = false;
+      row[IDX_STG.isActive] = false;
+      row[IDX_STG.isArchived] = false;
+      row[IDX_STG.isPromoted] = false;
+
+      row[IDX_STG.populatedAt] = new Date();
+      row[IDX_STG.notes] = 'Staged from Transaction_Resolution';
+
+      rowsToAppend.push(row);
+      stagingCanonSet.add(canon);
+    }
+
+    /* =========================
+       STEP — WRITE_OUTPUT
+    ========================= */
+
+    ETI_logStepStart_(SCRIPT_NAME, FUNCTION_NAME, 'WRITE_OUTPUT');
+
+    if (rowsToAppend.length > 0) {
+
+      stgSh.getRange(
+        stgSh.getLastRow() + 1,
+        1,
+        rowsToAppend.length,
+        stgHdr.length
+      ).setValues(rowsToAppend);
+    }
+
+    ETI_logStepEnd_(SCRIPT_NAME, FUNCTION_NAME, 'WRITE_OUTPUT');
+
+    /* =========================
+       SUMMARY
+    ========================= */
+
+    const durationMs = new Date().getTime() - t0.getTime();
+
+    ETI_log_({
+      scriptName: SCRIPT_NAME,
+      functionName: FUNCTION_NAME,
+      sheetName: STG_SHEET,
+      level: 'INFO',
+      action: 'SUMMARY',
+      details:
+        `Scanned=${scanned} | 
+        Inserted=${rowsToAppend.length} | ` +
+        `Skipped: NoTxn=${skipNoTxn}, HasItem=${skipHasItem}, NoCanon=${skipNoCanon}, Duplicate=${skipDuplicateCanon} | ` +
+        `DurationMs=${durationMs}`
+    });
+
+    /* =========================
+       END
+    ========================= */
+
+    ETI_log_({
+      scriptName: SCRIPT_NAME,
+      functionName: FUNCTION_NAME,
+      sheetName: STG_SHEET,
+      level: 'INFO',
+      action: 'END',
+      details: 'Execution completed'
+    });
+
+  } catch (err) {
+
+    ETI_logError_(
+      SCRIPT_NAME,
+      FUNCTION_NAME,
+      err,
+      'MAIN'
+    );
+
+    throw err;
+  } finally {
+
+    // ---- CRITICAL: ensures logs persist even in standalone execution ----
+    flushLogs_();
+
   }
-
-  /* ---------- Batch Write ---------- */
-
-  if (rowsToAppend.length > 0) {
-
-    stgSh.getRange(
-      stgSh.getLastRow() + 1,
-      1,
-      rowsToAppend.length,
-      stgHdr.length
-    ).setValues(rowsToAppend);
-
-  }
-
-  const durationMs = new Date().getTime() - t0.getTime();
-
-  console.log(`[${SCRIPT_NAME}] Rows scanned: ${scanned}`);
-  console.log(`[${SCRIPT_NAME}] Skipped no Txn_ID: ${skipNoTxn}`);
-  console.log(`[${SCRIPT_NAME}] Skipped has Item_ID: ${skipHasItem}`);
-  console.log(`[${SCRIPT_NAME}] Skipped no canonical: ${skipNoCanon}`);
-  console.log(`[${SCRIPT_NAME}] Skipped duplicate canonical: ${skipDuplicateCanon}`);
-  console.log(`[${SCRIPT_NAME}] Rows appended: ${rowsToAppend.length}`);
-  console.log(`[${SCRIPT_NAME}] END – Duration(ms): ${durationMs}`);
-
-  ETI_log_({
-    executionId: EXECUTION_ID,
-    scriptName: SCRIPT_NAME,
-    sheetName: STG_SHEET,
-    level: 'INFO',
-    action: 'SUMMARY',
-    details:
-      `Scanned=${scanned}, ` +
-      `SkipNoTxn=${skipNoTxn}, ` +
-      `SkipHasItem=${skipHasItem}, ` +
-      `SkipNoCanon=${skipNoCanon}, ` +
-      `SkipDuplicateCanon=${skipDuplicateCanon}, ` +
-      `Appended=${rowsToAppend.length}, ` +
-      `DurationMs=${durationMs}`
-  });
-
-  ETI_log_({
-    executionId: EXECUTION_ID,
-    scriptName: SCRIPT_NAME,
-    sheetName: STG_SHEET,
-    level: 'INFO',
-    action: 'END',
-    details: 'Execution completed successfully'
-  });
-
 }
-
-
 /*
 ========================================================================
 

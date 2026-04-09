@@ -37,7 +37,7 @@ function getAutomationSwitchMap_(){
 
 /*
 -------------------------------------
-LOGGING & DEBUG MODE SWITCHES (SINGLE SOURCE)
+LOGGING &  DEBUG MODE SWITCHES (SINGLE SOURCE)
 -------------------------------------
 // ACTION LOG
 */
@@ -52,6 +52,7 @@ function isExecutionLogEnabled_(){
   const switches = getAutomationSwitchMap_();
   return switches["Enable_Execution_Log"] === true;
 }
+
 
 // DEBUG MODE
 function isDebugModeEnabled_(){
@@ -356,7 +357,7 @@ function automationController_onChange(e){
 
       try{
 
-        fn();
+        ETI_executeControlledFunction_(nextSwitch, fn);
 
         const durationMs = new Date() - startTime;
 
@@ -383,5 +384,52 @@ function automationController_onChange(e){
   }
   finally{
     lock.releaseLock();
+  }
+}
+
+
+/*
+-------------------------------------
+Execution Wrapper — Controller Layer
+-------------------------------------
+*/
+function ETI_executeControlledFunction_(switchName, fn){
+
+  const functionName = fn.name || '';
+
+  const isPipeline = functionName.includes('pipeline');
+
+
+/*
+-------------------------------------
+LOGGER EXECUTION CONTEXT INITIALIZER
+-------------------------------------
+Purpose:
+Initializes execution metadata used by structured logging system.
+Must be called ONLY at execution entry points (Controller / Manual / Pipeline).
+-------------------------------------
+*/
+  initExecutionContext_({
+    run_context: 'STANDALONE',
+    trigger_type: 'CONTROLLER'
+  });
+
+  try {
+
+    /*
+    -------------------------------------
+    EXECUTE FUNCTION
+    -------------------------------------
+    */
+    fn();
+
+  } finally {
+
+    /*
+    -------------------------------------
+    ENSURE LOG FLUSH (CRITICAL)
+    -------------------------------------
+    */
+    flushLogs_();
   }
 }

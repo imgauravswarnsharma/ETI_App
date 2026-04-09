@@ -3,19 +3,88 @@
    ========================= */
 function pipeline_items_(){
 
+  // -------------------------------------
+  // EXECUTION CONTEXT
+  // -------------------------------------
+  // Rule:
+  // - If context already exists (Controller triggered), DO NOT reinitialize
+  // - Only enhance it (set pipeline_name + run_context)
+  // - If no context (manual run), initialize fresh
 
-  initExecutionContext_({
-    pipeline_name: "pipeline_items_",
-    run_context: "PIPELINE"
-  });
+  const SCRIPT_NAME = 'Pipeline';
+  const FUNCTION_NAME = 'pipeline_items_';
 
-  populateStagingLookupItems_FromTransactionResolution();
-  processStagingItems_StateMachine();
-  promoteApprovedItems_FromStaging_ToLookup();
-  backfill_ItemIDs_Machine_LookupItems();
-  cleanupOrphan_ItemIDs_Machine_LookupItems();
+  let ctx = getExecutionContext_();
+
+  if (ctx) {
+    // Existing context → enhance only
+    ctx.pipeline_name = FUNCTION_NAME;
+    ctx.run_context = "PIPELINE";
+  } else {
+    // No context → manual execution
+    initExecutionContext_({
+      pipeline_name: FUNCTION_NAME,
+      run_context: "PIPELINE"
+    });
+  }
+
+  const t0 = new Date();
+
+  try {
+
+    ETI_log_({
+      scriptName: SCRIPT_NAME,
+      functionName: FUNCTION_NAME,
+      level: 'INFO',
+      action: 'PIPELINE START',
+      details: 'Item pipeline execution started'
+    });
+
+    // -------------------------------------
+    // ACTUAL PIPELINE FUNCTIONS 
+    // -------------------------------------
+    populateStagingLookupItems_FromTransactionResolution();
+    processStagingItems_StateMachine();
+    promoteApprovedItems_FromStaging_ToLookup();
+    backfill_ItemIDs_Machine_LookupItems();
+    cleanupOrphan_ItemIDs_Machine_LookupItems();
+
+    const durationMs = new Date().getTime() - t0.getTime();
+
+    // -------------------------------------
+    // LOGGING
+    // -------------------------------------
+    ETI_log_({
+      scriptName: SCRIPT_NAME,
+      functionName: FUNCTION_NAME,
+      level: 'INFO',
+      action: 'PIPELINE END',
+      details: `Pipeline completed successfully | DurationMs=${durationMs}`
+    });
+
+  } catch (err) {
+
+    // -------------------------------------
+    // ERROR LOGGING
+    // -------------------------------------
+    ETI_logError_(
+      SCRIPT_NAME,
+      FUNCTION_NAME,
+      err,
+      'PIPELINE'
+    );
+
+    throw err;
+
+  } finally {
+
+    // -------------------------------------
+    // CRITICAL: Flush buffered logs once
+    // -------------------------------------
+    flushLogs_();
+
+  }
 }
-
 
 /* =========================
    Brand Pipeline
