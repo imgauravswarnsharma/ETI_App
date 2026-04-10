@@ -294,6 +294,7 @@ function automationController_onChange(e){
     */
     const functionMap = {
 
+      "Run_Transaction_Pipeline": pipeline_transactions_,
       "Run_Item_Pipeline": pipeline_items_,
       "Run_Brand_Pipeline": pipeline_brands_,
       "Run_Product_Pipeline": pipeline_products_,
@@ -396,19 +397,13 @@ Execution Wrapper — Controller Layer
 function ETI_executeControlledFunction_(switchName, fn){
 
   const functionName = fn.name || '';
-
   const isPipeline = functionName.includes('pipeline');
 
-
-/*
--------------------------------------
-LOGGER EXECUTION CONTEXT INITIALIZER
--------------------------------------
-Purpose:
-Initializes execution metadata used by structured logging system.
-Must be called ONLY at execution entry points (Controller / Manual / Pipeline).
--------------------------------------
-*/
+  /*
+  -------------------------------------
+  LOGGER EXECUTION CONTEXT INITIALIZER
+  -------------------------------------
+  */
   initExecutionContext_({
     run_context: 'STANDALONE',
     trigger_type: 'CONTROLLER'
@@ -416,20 +411,21 @@ Must be called ONLY at execution entry points (Controller / Manual / Pipeline).
 
   try {
 
-    /*
-    -------------------------------------
-    EXECUTE FUNCTION
-    -------------------------------------
-    */
-    fn();
+    globalThis.__ETI_SWITCH_NAME__ = switchName; // INJECT SWITCH CONTEXT IN LOGS
 
-  } finally {
+    fn(); // Execute Function
+
+  } finally { // Log Flush for Bstch Writing (Critical)
 
     /*
     -------------------------------------
-    ENSURE LOG FLUSH (CRITICAL)
+    CLEANUP + FLUSH
     -------------------------------------
     */
     flushLogs_();
+
+    globalThis.__ETI_SWITCH_NAME__ = null;   // important cleanup
   }
 }
+
+

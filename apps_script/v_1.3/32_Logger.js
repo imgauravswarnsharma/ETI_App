@@ -483,8 +483,8 @@ function ETI_log_(payload) {
     payload.scriptName || '',
     payload.functionName || '',
     payload.sheetName || '',
-    payload.switchName || '',
 
+    payload.switchName || globalThis.__ETI_SWITCH_NAME__ || '',
     payload.stepName ? formatStep_(payload.stepName) : '',
     payload.rowNumber || '',
 
