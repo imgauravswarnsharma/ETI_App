@@ -405,8 +405,10 @@ function ETI_executeControlledFunction_(switchName, fn){
   -------------------------------------
   */
   initExecutionContext_({
+
     run_context: 'STANDALONE',
     trigger_type: 'CONTROLLER'
+
   });
 
   try {
@@ -414,17 +416,26 @@ function ETI_executeControlledFunction_(switchName, fn){
     globalThis.__ETI_SWITCH_NAME__ = switchName; // INJECT SWITCH CONTEXT IN LOGS
 
     fn(); // Execute Function
+  } catch (err) {
 
-  } finally { // Log Flush for Bstch Writing (Critical)
+    /* -------------------------------------
+       CRITICAL: LOG ERROR TO LOGGER
+      ------------------------------------- */
+    ETI_logError_(
+      'Controller',
+      functionName,
+      '',                  // no sheet
+      err,
+      'CONTROLLED_EXECUTION'
+    );
 
-    /*
-    -------------------------------------
-    CLEANUP + FLUSH
-    -------------------------------------
-    */
-    flushLogs_();
+    throw err;  // preserve original flow
 
+  } finally {
+
+    flushLogs_(); // Log Flush for Batch Writing (Critical)
     globalThis.__ETI_SWITCH_NAME__ = null;   // important cleanup
+
   }
 }
 
